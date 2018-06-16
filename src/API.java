@@ -43,7 +43,7 @@ public class API {
 		
 		// set port, https and threadpool config
         threadPool(API_THREAD_POOL_MAX, API_THREAD_POOL_MIN, API_THREAD_POOL_TIMEOUT_MS);
-        secure(API_SSL_KEYSTORE_PATH, API_SSL_KEYSTORE_PW, API_SSL_TRUSTSTORE_PATH, API_SSL_TRUSTSTORE_PW);
+        secure(API_SSL_KEYSTORE_PATH, API_SSL_KEYSTORE_PW, API_SSL_TRUSTSTORE_PATH, API_SSL_TRUSTSTORE_PW, true);
         port(API_PORT);
         
         // setup routing		
