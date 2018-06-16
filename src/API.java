@@ -1,25 +1,52 @@
+import static j2html.TagCreator.body;
+import static j2html.TagCreator.br;
+import static j2html.TagCreator.button;
+import static j2html.TagCreator.div;
+import static j2html.TagCreator.form;
+import static j2html.TagCreator.h3;
+import static j2html.TagCreator.input;
+import static j2html.TagCreator.p;
+import static j2html.TagCreator.span;
+import static j2html.TagCreator.textarea;
+import static spark.Spark.get;
+import static spark.Spark.path;
+import static spark.Spark.port;
+import static spark.Spark.post;
+import static spark.Spark.threadPool;
+import static spark.Spark.secure;
+
 import java.security.Security;
 
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
+import org.eclipse.jetty.util.thread.ThreadPool;
 
-import static spark.Spark.*;
 import spark.Request;
-
-import static j2html.TagCreator.*;
+import spark.Response;
 
 public class API {
 	
 
 	public static final int API_PORT = 8080;
+	public static final int API_THREAD_POOL_MAX = 8;
+	public static final int API_THREAD_POOL_MIN = 2;
+	public static final int API_THREAD_POOL_TIMEOUT_MS = 30000;
+	
+	private static final String API_SSL_KEYSTORE_PATH = "crypto/server.keystore";
+	private static final String API_SSL_TRUSTSTORE_PATH = "crypto/server.truststore";
+	private static final String API_SSL_KEYSTORE_PW = "sparkmeup";
+	private static final String API_SSL_TRUSTSTORE_PW = "sparkmeup";
 
 	public static void main(String[] args) {
 		
 		// set the security provider...
 		Security.addProvider(new BouncyCastleProvider());
 		
-		// start embedded server at this port
+		// set port, https and threadpool config
+        threadPool(API_THREAD_POOL_MAX, API_THREAD_POOL_MIN, API_THREAD_POOL_TIMEOUT_MS);
+        secure(API_SSL_KEYSTORE_PATH, API_SSL_KEYSTORE_PW, API_SSL_TRUSTSTORE_PATH, API_SSL_TRUSTSTORE_PW);
         port(API_PORT);
-		
+        
+        // setup routing		
         path("/api", () -> {
 //        	before((request, response) -> {
 //        	    boolean authenticated;
@@ -34,43 +61,33 @@ public class API {
         	get("/", (request, response) -> "Blockchain-supported Ledgering API for Decentralized Applications - v1.0");
         	
             path("/contract", () -> {
-                get("/:cid", (request, response) -> {
-                	response.status(200);
-                	response.type("text/html");
-                	String cid = request.params(":cid");
-                	return viewContract(cid);
+                get("/:cid", (req, rsp) -> getContract(req, rsp));
+                get("/:cid/query-all-tx", (req, rsp) -> getTransactionList(req, rsp));
+                get("/:cid/query-tx/:txid", (req, rsp) -> getTransactionDetails(req, rsp));
+                get("/:cid/invoke-operation", (req, rsp) -> getInvokeOperation(req, rsp));
+                post("/:cid/invoke-operation", (req, rsp) -> {
+                	String newTxid = postInvokeOperation(req, rsp);
+                	rsp.redirect("query-tx/" + newTxid);
+                	return null;
                 });
-                get("/:cid/query-all-tx", (request, response) -> {
-                	response.status(200);
-                	response.type("text/html");
-                	String cid = request.params(":cid");
-                	return viewTransactionList(cid);
-                });
-                get("/:cid/query-tx/:txid", (request, response) -> {
-                	response.status(200);
-                	response.type("text/html");
-                	String cid = request.params(":cid");
-                	String txid = request.params(":txid");
-                	return viewTransactionDetails(cid, txid);
-                });
-                get("/:cid/invoke-operation", (request, response) -> {
-                	response.status(200);
-                	response.type("text/html");
-                	String cid = request.params(":cid");
-                	return formInvokeOperation(cid);
-                });
+                // missing deploycontract
             });
         });
         
 	}
 	
 	/* ---------------------- API METHODS --------------------- */
-	
-	private static String viewContract(String cid) {
+
+	private static String getContract(Request req, Response rsp) {
 		
+    	String cid = req.params(":cid");
+    	
 		// execute action
-		
+		//TODO
+    	
 		// return html
+    	rsp.status(200);
+    	rsp.type("text/html");
 		return body().with(
 		    h3("Contract ID: " + cid),
 		    div().with(
@@ -90,11 +107,15 @@ public class API {
 		).render();
 	}
 	
-	private static String viewTransactionList(String cid) {
-		
+	private static String getTransactionList(Request req, Response rsp) {
+
+    	String cid = req.params(":cid");
 		// execute action
+    	//TODO
 		
 		// return html
+    	rsp.status(200);
+    	rsp.type("text/html");
 		return body().with(
 		    h3("Contract ID: " + cid),
 		    div().with(
@@ -103,11 +124,17 @@ public class API {
 		).render();
 	}
 	
-	private static String viewTransactionDetails(String cid, String txid) {
+	private static String getTransactionDetails(Request req, Response rsp) {
 		
+
+    	String cid = req.params(":cid");
+    	String txid = req.params(":txid");
 		// execute action
+    	//TODO
 		
 		// return html
+    	rsp.status(200);
+    	rsp.type("text/html");
 		return body().with(
 		    h3("Transaction ID: " + txid),
 		    div().with(
@@ -116,19 +143,23 @@ public class API {
 		).render();
 	}
 	
-	private static String formInvokeOperation(String cid) {
+	private static String getInvokeOperation(Request req, Response rsp) {
 		
+		String cid = req.params(":cid");
 		// execute action
+		// TODO
 		
 		// return html
+    	rsp.status(200);
+    	rsp.type("text/html");
 		return body().with(
 		    h3("Contract ID: " + cid),
 		    div().with(
 		    	p("Fill in invocation details. View contract details if you need to know what operations are supported:"),
 		    	br(),
 		    	form()
-		    	.withMethod("PUT")
-		    	.withAction("//TODO")
+		    	.withMethod("POST")
+		    	.withAction("invoke-operation")
 		    	.with(
 				    	// operation id
 				    	span("Operation to execute: "),
@@ -160,6 +191,18 @@ public class API {
 		    	)
 		    )
 		).render();
+	}
+	
+	private static String postInvokeOperation(Request req, Response rsp) {
+
+    	String cid = req.params(":cid");
+    	String oid = req.queryParams("operationId");
+    	String tx = req.queryParams("transactionData");
+    	
+    	// TODO
+    	String txid = "3";// REMOVE
+    	
+    	return txid;
 	}
 	
 	private static boolean shouldReturnHtml(Request request) {
