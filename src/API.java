@@ -71,12 +71,12 @@ public class API {
         	
             path("/contract", () -> {
                 get("/:cid", (req, rsp) -> getContract(req, rsp));
-                get("/:cid/list-records", (req, rsp) -> getRecordsList(req, rsp));
-                get("/:cid/get-record/:key", (req, rsp) -> getRecordDetails(req, rsp));
-                get("/:cid/invoke-operation", (req, rsp) -> getInvokeOperation(req, rsp));
-                post("/:cid/invoke-operation", (req, rsp) -> {
+                get("/:cid/records", (req, rsp) -> getRecordsList(req, rsp));
+                get("/:cid/records/:key", (req, rsp) -> getRecordDetails(req, rsp));
+                get("/:cid/invoke", (req, rsp) -> getInvokeOperation(req, rsp));
+                post("/:cid/invoke", (req, rsp) -> {
                 	String newKey = postInvokeOperation(req, rsp);
-                	rsp.redirect("get-record/" + newKey);
+                	rsp.redirect("records/" + newKey);
                 	return null;
                 });
                 // missing deploycontract
