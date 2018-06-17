@@ -17,9 +17,11 @@ import static spark.Spark.secure;
 
 import java.security.Security;
 
+import org.apache.log4j.Logger;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.eclipse.jetty.util.thread.ThreadPool;
 
+import integration.HLFJavaClient;
 import spark.Request;
 import spark.Response;
 
@@ -35,6 +37,13 @@ public class API {
 	private static final String API_SSL_TRUSTSTORE_PATH = "crypto/server.truststore";
 	private static final String API_SSL_KEYSTORE_PW = "sparkmeup";
 	private static final String API_SSL_TRUSTSTORE_PW = "sparkmeup";
+	
+	public static final String HLF_INTEGRATION_CLIENT_USERNAME = "User1@blockchain-a.com";
+	public static final String HLF_INTEGRATION_CLIENT_ORG = "PeersA";
+	public static final String HLF_INTEGRATION_CLIENT_MSPID = "PeersAMSP";
+	public static final String HLF_INTEGRATION_CLIENT_CRT_PATH = "../../bootstrap/crypto-config/peerOrganizations/blockchain-a.com/users/User1@blockchain-a.com/msp/signcerts/User1@blockchain-a.com-cert.pem";
+	public static final String HLF_INTEGRATION_CLIENT_KEY_PATH = "../../bootstrap/crypto-config/peerOrganizations/blockchain-a.com/users/User1@blockchain-a.com/msp/keystore/User1@blockchain-a.com-priv.pem";
+//	public static final String HLF_INTEGRATION_CHANNEL_NAME = "mainchannel";	// channel can be
 
 	public static void main(String[] args) {
 		
@@ -62,12 +71,12 @@ public class API {
         	
             path("/contract", () -> {
                 get("/:cid", (req, rsp) -> getContract(req, rsp));
-                get("/:cid/query-all-tx", (req, rsp) -> getTransactionList(req, rsp));
-                get("/:cid/query-tx/:txid", (req, rsp) -> getTransactionDetails(req, rsp));
+                get("/:cid/list-records", (req, rsp) -> getRecordsList(req, rsp));
+                get("/:cid/get-record/:key", (req, rsp) -> getRecordDetails(req, rsp));
                 get("/:cid/invoke-operation", (req, rsp) -> getInvokeOperation(req, rsp));
                 post("/:cid/invoke-operation", (req, rsp) -> {
-                	String newTxid = postInvokeOperation(req, rsp);
-                	rsp.redirect("query-tx/" + newTxid);
+                	String newKey = postInvokeOperation(req, rsp);
+                	rsp.redirect("get-record/" + newKey);
                 	return null;
                 });
                 // missing deploycontract
@@ -107,7 +116,7 @@ public class API {
 		).render();
 	}
 	
-	private static String getTransactionList(Request req, Response rsp) {
+	private static String getRecordsList(Request req, Response rsp) {
 
     	String cid = req.params(":cid");
 		// execute action
@@ -119,16 +128,16 @@ public class API {
 		return body().with(
 		    h3("Contract ID: " + cid),
 		    div().with(
-		    	p("Below is a list of transactions/operations related with the contract:")
+		    	p("Below is a list of records related with the contract:")
 		    )
 		).render();
 	}
 	
-	private static String getTransactionDetails(Request req, Response rsp) {
+	private static String getRecordDetails(Request req, Response rsp) {
 		
 
     	String cid = req.params(":cid");
-    	String txid = req.params(":txid");
+    	String key = req.params(":key");
 		// execute action
     	//TODO
 		
@@ -136,9 +145,9 @@ public class API {
     	rsp.status(200);
     	rsp.type("text/html");
 		return body().with(
-		    h3("Transaction ID: " + txid),
+		    h3("Record Key: " + key),
 		    div().with(
-		    	p("Below is all data related with the specified transaction:")
+		    	p("Below is all data related with the specified record:")
 		    )
 		).render();
 	}
@@ -200,9 +209,9 @@ public class API {
     	String tx = req.queryParams("transactionData");
     	
     	// TODO
-    	String txid = "3";// REMOVE
+    	String key = "3";// REMOVE
     	
-    	return txid;
+    	return key;
 	}
 	
 	private static boolean shouldReturnHtml(Request request) {
