@@ -1,10 +1,19 @@
 package integration;
 
+import java.io.File;
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Properties;
+
 import org.apache.log4j.Logger;
-import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.hyperledger.fabric.sdk.ChaincodeID;
 import org.hyperledger.fabric.sdk.Channel;
-import org.hyperledger.fabric.sdk.Enrollment;
 import org.hyperledger.fabric.sdk.EventHub;
 import org.hyperledger.fabric.sdk.HFClient;
 import org.hyperledger.fabric.sdk.Orderer;
@@ -17,165 +26,143 @@ import org.hyperledger.fabric.sdk.exception.InvalidArgumentException;
 import org.hyperledger.fabric.sdk.exception.ProposalException;
 import org.hyperledger.fabric.sdk.exception.TransactionException;
 import org.hyperledger.fabric.sdk.security.CryptoSuite;
-import org.hyperledger.fabric_ca.sdk.HFCAClient;
-import org.hyperledger.fabric_ca.sdk.RegistrationRequest;
 
-import java.io.File;
-import java.io.IOException;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.security.Security;
-import java.util.Collection;
-import java.util.Properties;
-
-/**
- * <h1>HFJavaSDKBasicExample</h1>
- * <p>
- * Simple example showcasing basic fabric-ca and fabric actions.
- * The demo required fabcar fabric up and running.
- * <p>
- * The demo shows
- * <ul>
- * <li>connecting to fabric-ca</li>
- * <li>enrolling admin to get new key-pair, certificate</li>
- * <li>registering and enrolling a new user using admin</li>
- * <li>creating HF client and initializing channel</li>
- * <li>invoking chaincode query</li>
- * </ul>
- *
- * @author lkolisko
- */
-public class HLFJavaClient {
-
-	public static final String HLF_USER_NAME = "User1@blockchain-a.com";
-	public static final String HLF_CLIENT_ORG = "PeersA";
-	public static final String HLF_CLIENT_MSPID = "PeersAMSP";
-	public static final String HLF_CLIENT_CRT_PATH = "../../crypto-config/peerOrganizations/blockchain-a.com/users/User1@blockchain-a.com/msp/signcerts/User1@blockchain-a.com-cert.pem";
-	public static final String HLF_CLIENT_KEY_PATH = "../../crypto-config/peerOrganizations/blockchain-a.com/users/User1@blockchain-a.com/msp/keystore/User1@blockchain-a.com-priv.pem";
-	public static final String HLF_CHANNEL_NAME = "mainchannel";
-	public static final String HLF_CHAINCODE_NAME = "econtract";
+public class Dispatcher {
 	
-    private static final Logger log = Logger.getLogger(HLFJavaClient.class);
-
-
-    public static void main(String[] args) throws Exception {
+	public static final int CHAINCODE_QUERY_OPERATION = 0;
+	public static final int CHAINCODE_INVOKE_OPERATION = 1;
+	public static int CHAINCODE_CALL_INTERVAL_MS = 500;
+	
+    private static final Logger log = Logger.getLogger(Dispatcher.class);
+    
+    private HFClient client;
+    private Map<String,Channel> channels;
+    private String currChannel;
+    
+    public Dispatcher(String crtPath, String keyPath, String username, String mspId, String org, String channelName) throws Exception {
     	
-    	Security.addProvider(new BouncyCastleProvider());
-    	
-        // create fabric-ca client
+//      // create fabric-ca client
 //      HFCAClient caClient = getHfCaClient("http://localhost:7054", null);
-
-        // enroll or load admin
+//
+// 		// enroll or load admin
 //      AppUser admin = getAdmin(caClient);
 //      log.info(admin);
 
         // register and enroll new user
-        HLFUser appUser = getUser(HLF_CLIENT_CRT_PATH, HLF_CLIENT_KEY_PATH, HLF_USER_NAME);
+        HLFUser appUser = getUser(crtPath, keyPath, username, mspId, org);
         log.info(appUser);
-
+       
         // get HFC client instance
-        HFClient client = getHfClient();
+        client = getHfClient();
         // set user context
         client.setUserContext(appUser);
 
-        // get HFC channel using the client
-        Channel channel = getChannel(client);
-        log.info("Channel: " + channel.getName());
+        // get HFC first channel using the client
+        channels = new HashMap<String,Channel>();
+        Channel firstChannel = initChannel(channelName);
+        channels.put(channelName, firstChannel);
+        log.info("Channel: " + firstChannel.getName());
         
-        // call invoke
-        addProperty(client, new String[] {"PROPERTY1", "doge", "Example of a marvelous doge", "nil", "shock and awe", "20"});
-        
-        // wait a few secs...
-        Thread.sleep(10000);
-
-        // call query blockchain
-        queryAll(client);
+        // set current channel
+        currChannel = channelName;
+    }
+    
+    // use HLFJavaClient.CHAINCODE_QUERY_OPERATION or HLFJavaClient.CHAINCODE_INVOKE_OPERATION
+    public void callChaincodeFunction(int op, String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws InterruptedException {
+    	try {
+    		// call corresponding chaincode operation
+    		if (op == CHAINCODE_QUERY_OPERATION) {
+    			query(chaincodeId, chaincodeFn, chaincodeArgs);
+    		} else if (op == CHAINCODE_INVOKE_OPERATION) {
+    			invoke(chaincodeId, chaincodeFn, chaincodeArgs);
+    		} else {
+    			throw new IllegalArgumentException("Unrecognized operation: " + op + ". Use HLFJavaClient.CHAINCODE_QUERY_OPERATION or HLFJavaClient.CHAINCODE_INVOKE_OPERATION!");
+    		}
+			
+		} catch (ProposalException | InvalidArgumentException e) {
+			e.printStackTrace();
+		} finally {
+			Thread.sleep(CHAINCODE_CALL_INTERVAL_MS);
+		}
+    }
+    
+    public void changeChannel(String newChannelName) throws InvalidArgumentException, TransactionException {
+    	
+    	Channel newChannel = channels.get(newChannelName);
+    	
+    	// if channel does not exist, initialize new channel on the client side
+    	if (newChannel == null) {
+        	newChannel = initChannel(newChannelName);
+            channels.put(newChannelName, newChannel);
+    	}
+    	// set current channel
+    	currChannel = newChannelName;
     }
 
-
-    /**
-     * Invoke blockchain query
-     *
-     * @param client The HF Client
-     * @throws ProposalException
-     * @throws InvalidArgumentException
-     */
-    static void queryAll(HFClient client) throws ProposalException, InvalidArgumentException {
+    private void query(String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws ProposalException, InvalidArgumentException {
+    	
         // get channel instance from client
-        Channel channel = client.getChannel(HLF_CHANNEL_NAME);
+        Channel channel = channels.get(currChannel);
+        
         // create chaincode request
         QueryByChaincodeRequest qpr = client.newQueryProposalRequest();
+        
         // build cc id providing the chaincode name. Version is omitted here.
-        ChaincodeID CCId = ChaincodeID.newBuilder().setName(HLF_CHAINCODE_NAME).build();
+        ChaincodeID CCId = ChaincodeID.newBuilder().setName(chaincodeId).build();
         qpr.setChaincodeID(CCId);
+        
         // CC function to be called
-        qpr.setFcn("queryAll");
+        qpr.setFcn(chaincodeFn);
+        qpr.setArgs(chaincodeArgs);
         Collection<ProposalResponse> res = channel.queryByChaincode(qpr);
         
-        System.out.println("Sending query request, function 'queryAll', through chaincode '" + HLF_CHAINCODE_NAME + "'...");
+        log.info("Sending query request, function '" + chaincodeFn + "' with arguments ['" + String.join("', '", chaincodeArgs) + "'], through chaincode '" + chaincodeId + "'...");
         
         // display response
         for (ProposalResponse pres : res) {
             String stringResponse = new String(pres.getChaincodeActionResponsePayload());
             log.info(stringResponse);
-            System.out.println(stringResponse);
         }
 
     }
     
-    static void addProperty(HFClient client, String[] property) throws ProposalException, InvalidArgumentException {
+    private void invoke(String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws ProposalException, InvalidArgumentException {
+    	
         // get channel instance from client
-        Channel channel = client.getChannel(HLF_CHANNEL_NAME);
+        Channel channel = channels.get(currChannel);
+        
         // create chaincode request
         TransactionProposalRequest tpr = client.newTransactionProposalRequest();
-        // build cc id providing the chaincode name. Version is omitted here.
-        ChaincodeID CCId = ChaincodeID.newBuilder().setName(HLF_CHAINCODE_NAME).build();
-        tpr.setChaincodeID(CCId);
-        // CC function to be called
-        tpr.setFcn("addProperty");
-        tpr.setArgs(property);
         
-        System.out.println("Sending transaction proposal, function 'addProperty', through chaincode '" + HLF_CHAINCODE_NAME + "'...");
+        // build cc id providing the chaincode name. Version is omitted here.
+        ChaincodeID CCId = ChaincodeID.newBuilder().setName(chaincodeFn).build();
 
+        // CC function to be called
+        tpr.setChaincodeID(CCId);
+        tpr.setFcn(chaincodeFn);
+        tpr.setArgs(chaincodeArgs);
+        
         Collection<ProposalResponse> res = channel.sendTransactionProposal(tpr);
+        
+        log.info("Sending transaction proposal, function '" + chaincodeFn + "' with arguments ['" + String.join("', '", chaincodeArgs) + "'], through chaincode '" + chaincodeId + "'...");
+        
         // display response
         for (ProposalResponse pres : res) {
             String stringResponse = "Response from endorser is: " + pres.getChaincodeActionResponseStatus();
             log.info(stringResponse);
-            System.out.println(stringResponse);
         }
         
-        System.out.println("Collecting endorsements and sending transaction...");
+        log.info("Collecting endorsements and sending transaction...");
 
         // send transaction with endorsements
         channel.sendTransaction(res);
-        System.out.println("Transaction sent.");
+        log.info("Transaction sent.");
     }
-
-
-    /**
-     * Initialize and get HF channel
-     *
-     * @param client The HFC client
-     * @return Initialized channel
-     * @throws InvalidArgumentException
-     * @throws TransactionException
-     */
-    static Channel getChannel(HFClient client) throws InvalidArgumentException, TransactionException {
+    
+    private Channel initChannel(String channelName) throws InvalidArgumentException, TransactionException {
         
-    	Channel channel = client.newChannel(HLF_CHANNEL_NAME);
+    	Channel channel = client.newChannel(channelName);
     	
-    	class PeerOrgPort {
-    		public String org;
-    		public int port;
-    		
-    		public PeerOrgPort(String org, int port) {
-    			this.org = org;
-    			this.port = port;
-    		}
-    	}
     	
     	PeerOrgPort[] peers = new PeerOrgPort[] {
     		new PeerOrgPort("a", 7051),
@@ -245,63 +232,17 @@ public class HLFJavaClient {
         client.setCryptoSuite(cryptoSuite);
         return client;
     }
-
-
-    /**
-     * Register and enroll user with userId.
-     * If AppUser object with the name already exist on fs it will be loaded and
-     * registration and enrollment will be skipped.
-     *
-     * @param caClient  The fabric-ca client.
-     * @param registrar The registrar to be used.
-     * @param userId    The user id.
-     * @return AppUser instance with userId, affiliation,mspId and enrollment set.
-     * @throws Exception
-     */
-    static HLFUser getUser(String certPath, String keyPath, String userId) throws Exception {
+    
+    static HLFUser getUser(String certPath, String keyPath, String userId, String mspId, String org) throws Exception {
         HLFUser appUser = null;//tryDeserialize(userId);
         if (appUser == null) {
             //String enrollmentSecret = caClient.register(rr, registrar);
             //Enrollment enrollment = caClient.enroll(userId, enrollmentSecret);
-            appUser = new HLFUser(userId, HLF_CLIENT_ORG, HLF_CLIENT_MSPID, certPath, keyPath);
+            appUser = new HLFUser(userId, org, mspId, certPath, keyPath);
             //serialize(appUser);
         }
         return appUser;
     }
-
-    /**
-     * Enroll admin into fabric-ca using {@code admin/adminpw} credentials.
-     * If AppUser object already exist serialized on fs it will be loaded and
-     * new enrollment will not be executed.
-     *
-     * @param caClient The fabric-ca client
-     * @return AppUser instance with userid, affiliation, mspId and enrollment set
-     * @throws Exception
-     */
-//    static AppUser getAdmin(HFCAClient caClient) throws Exception {
-//        AppUser admin = tryDeserialize("admin");
-//        if (admin == null) {
-//            Enrollment adminEnrollment = caClient.enroll("admin", "adminpw");
-//            admin = new AppUser("admin", "org1", "Org1MSP", adminEnrollment);
-//            serialize(admin);
-//        }
-//        return admin;
-//    }
-
-    /**
-     * Get new fabic-ca client
-     *
-     * @param caUrl              The fabric-ca-server endpoint url
-     * @param caClientProperties The fabri-ca client properties. Can be null.
-     * @return new client instance. never null.
-     * @throws Exception
-     */
-//    static HFCAClient getHfCaClient(String caUrl, Properties caClientProperties) throws Exception {
-//        CryptoSuite cryptoSuite = CryptoSuite.Factory.getCryptoSuite();
-//        HFCAClient caClient = HFCAClient.createNewInstance(caUrl, caClientProperties);
-//        caClient.setCryptoSuite(cryptoSuite);
-//        return caClient;
-//    }
 
 
     // user serialization and deserialization utility functions

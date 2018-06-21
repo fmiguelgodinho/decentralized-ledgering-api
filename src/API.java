@@ -21,7 +21,9 @@ import org.apache.log4j.Logger;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.eclipse.jetty.util.thread.ThreadPool;
 
+import integration.Dispatcher;
 import integration.HLFJavaClient;
+import integration.HLFUser;
 import spark.Request;
 import spark.Response;
 
@@ -43,18 +45,41 @@ public class API {
 	public static final String HLF_INTEGRATION_CLIENT_MSPID = "PeersAMSP";
 	public static final String HLF_INTEGRATION_CLIENT_CRT_PATH = "../../bootstrap/crypto-config/peerOrganizations/blockchain-a.com/users/User1@blockchain-a.com/msp/signcerts/User1@blockchain-a.com-cert.pem";
 	public static final String HLF_INTEGRATION_CLIENT_KEY_PATH = "../../bootstrap/crypto-config/peerOrganizations/blockchain-a.com/users/User1@blockchain-a.com/msp/keystore/User1@blockchain-a.com-priv.pem";
-//	public static final String HLF_INTEGRATION_CHANNEL_NAME = "mainchannel";	// channel can be
+	public static final String HLF_INTEGRATION_CHANNEL_NAME = "mainchannel";	// TODO: channel can be defined in contracts
 
-	public static void main(String[] args) {
+	private static Dispatcher dpt;
+	
+	public static void main(String[] args) throws Exception {
 		
 		// set the security provider...
 		Security.addProvider(new BouncyCastleProvider());
 		
 		// set port, https and threadpool config
-        threadPool(API_THREAD_POOL_MAX, API_THREAD_POOL_MIN, API_THREAD_POOL_TIMEOUT_MS);
-        secure(API_SSL_KEYSTORE_PATH, API_SSL_KEYSTORE_PW, API_SSL_TRUSTSTORE_PATH, API_SSL_TRUSTSTORE_PW, true);
-        port(API_PORT);
-        
+        port(
+    		API_PORT
+    	);
+        threadPool(
+    		API_THREAD_POOL_MAX, 
+    		API_THREAD_POOL_MIN, 
+    		API_THREAD_POOL_TIMEOUT_MS
+        );
+        secure(
+    		API_SSL_KEYSTORE_PATH, 
+    		API_SSL_KEYSTORE_PW, 
+    		API_SSL_TRUSTSTORE_PATH, 
+    		API_SSL_TRUSTSTORE_PW, 
+    		true
+    	);
+        // initialize dispatcher
+        dpt = new Dispatcher(
+    		HLF_INTEGRATION_CLIENT_CRT_PATH, 
+    		HLF_INTEGRATION_CLIENT_KEY_PATH, 
+    		HLF_INTEGRATION_CLIENT_USERNAME, 
+    		HLF_INTEGRATION_CLIENT_MSPID, 
+    		HLF_INTEGRATION_CLIENT_ORG, 
+    		HLF_INTEGRATION_CHANNEL_NAME
+    	);
+
         // setup routing		
         path("/api", () -> {
 //        	before((request, response) -> {

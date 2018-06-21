@@ -1,7 +1,4 @@
 package integration;
-import org.hyperledger.fabric.sdk.Enrollment;
-import org.hyperledger.fabric.sdk.User;
-
 import java.io.BufferedReader;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -18,6 +15,9 @@ import java.security.spec.PKCS8EncodedKeySpec;
 import java.util.Set;
 
 import javax.xml.bind.DatatypeConverter;
+
+import org.hyperledger.fabric.sdk.Enrollment;
+import org.hyperledger.fabric.sdk.User;
 
 /**
  * <h1>AppUser</h1>
