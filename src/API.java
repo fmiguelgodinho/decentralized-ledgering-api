@@ -12,18 +12,14 @@ import static spark.Spark.get;
 import static spark.Spark.path;
 import static spark.Spark.port;
 import static spark.Spark.post;
-import static spark.Spark.threadPool;
 import static spark.Spark.secure;
+import static spark.Spark.threadPool;
 
 import java.security.Security;
 
-import org.apache.log4j.Logger;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
-import org.eclipse.jetty.util.thread.ThreadPool;
 
 import integration.Dispatcher;
-import integration.HLFJavaClient;
-import integration.HLFUser;
 import spark.Request;
 import spark.Response;
 
