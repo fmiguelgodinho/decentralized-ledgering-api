@@ -17,6 +17,11 @@ import static spark.Spark.threadPool;
 
 import java.security.Security;
 
+import javax.json.JsonObject;
+import javax.script.ScriptEngine;
+import javax.script.ScriptEngineManager;
+import javax.script.ScriptException;
+
 import org.apache.log4j.Level;
 import org.apache.log4j.LogManager;
 import org.apache.log4j.Logger;
@@ -131,9 +136,6 @@ public class API {
 		
     	String cid = req.params(":cid");
     	
-		// execute action
-		//TODO
-    	
     	String result = null;
     	try {
 			result = dpt.callChaincodeFunction(
@@ -142,7 +144,33 @@ public class API {
 					"getContractDefinition", 
 					new String[] {}								// empty args
 			);
+			
 		} catch (InterruptedException e) {
+			e.printStackTrace();
+		}
+    	
+
+    	if (result == null) {
+    		
+    		rsp.status(404);
+    		rsp.type("text/html");
+    		return body().with(
+    			h3("Couldn't find the contract you specified!"),
+    			div().with(
+    				p("Make sure you've typed its ID correctly and that it exists.")
+    			)
+    		).render();
+    	}
+    	
+
+		String prettyPrintedJson = null;
+		try {
+			// pretty print
+			ScriptEngine se = new ScriptEngineManager().getEngineByName("JavaScript");
+			se.put("jsonString", result);
+			se.eval("result = JSON.stringify(JSON.parse(jsonString), null, 2)");
+			prettyPrintedJson = (String) se.get("result");
+		} catch (ScriptException e) {
 			e.printStackTrace();
 		}
     	
@@ -154,7 +182,9 @@ public class API {
 		    div().with(
 		    	p("Below is all metadata related with the contract:")
 		    ),
-		    div(result)
+		    div(
+		    	prettyPrintedJson
+		    )
 //			          model.getAllPosts().stream().map((post) ->
 //			                div().with(
 //			                        h2(post.getTitle()),
