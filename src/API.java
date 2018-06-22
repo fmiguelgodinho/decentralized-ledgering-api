@@ -22,6 +22,7 @@ import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import integration.Dispatcher;
 import spark.Request;
 import spark.Response;
+import util.NodeConnection;
 
 public class API {
 	
@@ -43,6 +44,18 @@ public class API {
 	public static final String HLF_INTEGRATION_CLIENT_KEY_PATH = "../../bootstrap/crypto-config/peerOrganizations/blockchain-a.com/users/User1@blockchain-a.com/msp/keystore/User1@blockchain-a.com-priv.pem";
 	public static final String HLF_INTEGRATION_CHANNEL_NAME = "mainchannel";	// TODO: channel can be defined in contracts
 
+	// TODO: nodes can be specified on contract
+	public static NodeConnection[] HLF_INTEGRATION_CHANNEL_NODES = new NodeConnection[] {
+		new NodeConnection(NodeConnection.PEER_TYPE, "peer0.blockchain-a.com", "localhost", 7051, "../../bootstrap/crypto-config/peerOrganizations/blockchain-a.com/tlsca/tlsca.blockchain-a.com-cert.pem"),
+		new NodeConnection(NodeConnection.PEER_TYPE, "peer0.blockchain-b.com", "localhost", 10051, "../../bootstrap/crypto-config/peerOrganizations/blockchain-b.com/tlsca/tlsca.blockchain-b.com-cert.pem"),
+		new NodeConnection(NodeConnection.PEER_TYPE, "peer0.blockchain-c.com", "localhost", 8051, "../../bootstrap/crypto-config/peerOrganizations/blockchain-c.com/tlsca/tlsca.blockchain-c.com-cert.pem"),
+		new NodeConnection(NodeConnection.PEER_TYPE, "peer0.blockchain-d.com", "localhost", 9051, "../../bootstrap/crypto-config/peerOrganizations/blockchain-d.com/tlsca/tlsca.blockchain-d.com-cert.pem"),
+		new NodeConnection(NodeConnection.PEER_TYPE, "peer0.blockchain-e.com", "localhost", 11051, "../../bootstrap/crypto-config/peerOrganizations/blockchain-e.com/tlsca/tlsca.blockchain-e.com-cert.pem"),
+		new NodeConnection(NodeConnection.PEER_TYPE, "peer0.blockchain-f.com", "localhost", 12051, "../../bootstrap/crypto-config/peerOrganizations/blockchain-f.com/tlsca/tlsca.blockchain-f.com-cert.pem"),
+		new NodeConnection(NodeConnection.ORDERER_TYPE, "orderer0.consensus.com", "localhost", 7050, "../../bootstrap/crypto-config/ordererOrganizations/consensus.com/tlsca/tlsca.consensus.com-cert.pem")
+	};
+	
+	
 	private static Dispatcher dpt;
 	
 	public static void main(String[] args) throws Exception {
@@ -66,6 +79,7 @@ public class API {
     		API_SSL_TRUSTSTORE_PW, 
     		true
     	);
+        
         // initialize dispatcher
         dpt = new Dispatcher(
     		HLF_INTEGRATION_CLIENT_CRT_PATH, 
@@ -73,7 +87,8 @@ public class API {
     		HLF_INTEGRATION_CLIENT_USERNAME, 
     		HLF_INTEGRATION_CLIENT_MSPID, 
     		HLF_INTEGRATION_CLIENT_ORG, 
-    		HLF_INTEGRATION_CHANNEL_NAME
+    		HLF_INTEGRATION_CHANNEL_NAME,
+    		HLF_INTEGRATION_CHANNEL_NODES
     	);
 
         // setup routing		

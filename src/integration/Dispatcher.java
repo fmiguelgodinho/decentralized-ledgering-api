@@ -27,19 +27,26 @@ import org.hyperledger.fabric.sdk.exception.ProposalException;
 import org.hyperledger.fabric.sdk.exception.TransactionException;
 import org.hyperledger.fabric.sdk.security.CryptoSuite;
 
+import util.Pair;
+import util.NodeConnection;
+
 public class Dispatcher {
 	
 	public static final int CHAINCODE_QUERY_OPERATION = 0;
 	public static final int CHAINCODE_INVOKE_OPERATION = 1;
 	public static int CHAINCODE_CALL_INTERVAL_MS = 500;
 	
+	public static final String BLOCKCHAIN_NEGOTIATION_MODE = "TLS";
+	public static final String BLOCKCHAIN_SSL_PROVIDER = "openSSL";
+	
+	
     private static final Logger log = Logger.getLogger(Dispatcher.class);
     
     private HFClient client;
-    private Map<String,Channel> channels;
+    private Map<String,Pair<Channel, NodeConnection[]>> channels;
     private String currChannel;
     
-    public Dispatcher(String crtPath, String keyPath, String username, String mspId, String org, String channelName) throws Exception {
+    public Dispatcher(String crtPath, String keyPath, String username, String mspId, String org, String channelName, NodeConnection[] nodesOnChannel) throws Exception {
     	
 //      // create fabric-ca client
 //      HFCAClient caClient = getHfCaClient("http://localhost:7054", null);
@@ -58,9 +65,9 @@ public class Dispatcher {
         client.setUserContext(appUser);
 
         // get HFC first channel using the client
-        channels = new HashMap<String,Channel>();
-        Channel firstChannel = initChannel(channelName);
-        channels.put(channelName, firstChannel);
+        channels = new HashMap<String,Pair<Channel, NodeConnection[]>>();
+        Channel firstChannel = initChannel(channelName, nodesOnChannel);
+        channels.put(channelName, new Pair(firstChannel, nodesOnChannel));
         log.info("Channel: " + firstChannel.getName());
         
         // set current channel
@@ -86,14 +93,18 @@ public class Dispatcher {
 		}
     }
     
-    public void changeChannel(String newChannelName) throws InvalidArgumentException, TransactionException {
+    public void changeChannel(String newChannelName, NodeConnection[] nodesOnChannel) throws InvalidArgumentException, TransactionException {
     	
-    	Channel newChannel = channels.get(newChannelName);
+    	Pair<Channel,NodeConnection[]> existingChannelCfg = channels.get(newChannelName);
     	
     	// if channel does not exist, initialize new channel on the client side
-    	if (newChannel == null) {
-        	newChannel = initChannel(newChannelName);
-            channels.put(newChannelName, newChannel);
+    	if (existingChannelCfg == null) {
+        	Channel newChannel = initChannel(newChannelName, nodesOnChannel);
+            channels.put(newChannelName, new Pair(newChannel, nodesOnChannel));
+    	} else {
+    		// just update peer connections
+    		existingChannelCfg.setRight(nodesOnChannel);
+            channels.put(newChannelName, existingChannelCfg);
     	}
     	// set current channel
     	currChannel = newChannelName;
@@ -102,7 +113,7 @@ public class Dispatcher {
     private void query(String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws ProposalException, InvalidArgumentException {
     	
         // get channel instance from client
-        Channel channel = channels.get(currChannel);
+        Channel channel = channels.get(currChannel).getLeft();
         
         // create chaincode request
         QueryByChaincodeRequest qpr = client.newQueryProposalRequest();
@@ -129,7 +140,7 @@ public class Dispatcher {
     private void invoke(String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws ProposalException, InvalidArgumentException {
     	
         // get channel instance from client
-        Channel channel = channels.get(currChannel);
+        Channel channel = channels.get(currChannel).getLeft();
         
         // create chaincode request
         TransactionProposalRequest tpr = client.newTransactionProposalRequest();
@@ -159,61 +170,44 @@ public class Dispatcher {
         log.info("Transaction sent.");
     }
     
-    private Channel initChannel(String channelName) throws InvalidArgumentException, TransactionException {
+    private Channel initChannel(String channelName, NodeConnection[] nodesOnChannel) throws InvalidArgumentException, TransactionException {
         
     	Channel channel = client.newChannel(channelName);
     	
-    	
-    	PeerOrgPort[] peers = new PeerOrgPort[] {
-    		new PeerOrgPort("a", 7051),
-    		new PeerOrgPort("b", 10051),
-    		new PeerOrgPort("c", 8051),
-    		new PeerOrgPort("d", 9051),
-    		new PeerOrgPort("e", 11051),
-    		new PeerOrgPort("f", 12051)
-    	};
-    	
-    	
-    	for (int i = 0; i < peers.length; i++) {
-    		File tlsCrt = Paths.get("../../crypto-config/peerOrganizations/blockchain-" + peers[i].org + ".com/tlsca", "tlsca.blockchain-" + peers[i].org + ".com-cert.pem").toFile();
+    	for (int i = 0; i < nodesOnChannel.length; i++) {
+    		File tlsCrt = Paths.get(nodesOnChannel[i].tlsCrtPath).toFile();
             
             if (!tlsCrt.exists())
             	throw new RuntimeException("Missing TLS cert files");
             
             Properties secPeerProperties = new Properties();
-            secPeerProperties.setProperty("hostnameOverride", "peer0.blockchain-" + peers[i].org + ".com");
-            secPeerProperties.setProperty("sslProvider", "openSSL");
-            secPeerProperties.setProperty("negotiationType", "TLS");
+            secPeerProperties.setProperty("hostnameOverride", nodesOnChannel[i].name);
+            secPeerProperties.setProperty("sslProvider", BLOCKCHAIN_SSL_PROVIDER);
+            secPeerProperties.setProperty("negotiationType", BLOCKCHAIN_NEGOTIATION_MODE);
             secPeerProperties.setProperty("pemFile", tlsCrt.getAbsolutePath());
             
-            Peer peer = client.newPeer("peer0.blockchain-" + peers[i].org + ".com", "grpcs://localhost:"  + peers[i].port, secPeerProperties);
-            channel.addPeer(peer);
+            if (nodesOnChannel[i].type == NodeConnection.PEER_TYPE) {
+            	// peer name and endpoint in network
+	            Peer peer = client.newPeer(nodesOnChannel[i].name, "grpcs://" + nodesOnChannel[i].host + ":"  + nodesOnChannel[i].port, secPeerProperties);
+	            channel.addPeer(peer);
+            } else if (nodesOnChannel[i].type == NodeConnection.ORDERER_TYPE) {
+            	// orderer name and endpoint in network
+                Orderer orderer = client.newOrderer(nodesOnChannel[i].name, "grpcs://" + nodesOnChannel[i].host + ":"  + nodesOnChannel[i].port, secPeerProperties);
+                channel.addOrderer(orderer);
+            }
             
             
-            if (peers[i].org.equals("a")) {
+            // TODO: remove this
+            if (i == 0) {
 	            // eventhub name and endpoint in fabcar network
 	            EventHub eventHub = client.newEventHub("eventhub01", "grpcs://localhost:7053", secPeerProperties);
 	            channel.addEventHub(eventHub);
             }
+            // TODO ENDS HERE
     	}
     	
-    	
-    	File tlsOrdCrt = Paths.get("../../crypto-config/ordererOrganizations/consensus.com/tlsca", "tlsca.consensus.com-cert.pem").toFile();
-        if (!tlsOrdCrt.exists())
-        	throw new RuntimeException("Missing TLS cert files");
-        
-        Properties secOrdererProperties = new Properties();
-        secOrdererProperties.setProperty("hostnameOverride", "orderer0.consensus.com");
-        secOrdererProperties.setProperty("sslProvider", "openSSL");
-        secOrdererProperties.setProperty("negotiationType", "TLS");
-        secOrdererProperties.setProperty("pemFile", tlsOrdCrt.getAbsolutePath());
-    	
-    	// orderer name and endpoint in fabcar network
-        Orderer orderer = client.newOrderer("orderer0.consensus.com", "grpcs://localhost:7050", secOrdererProperties);
-        
-        channel.addOrderer(orderer);
+    	// init channel, finally
         channel.initialize();
-        
         return channel;
     }
 
