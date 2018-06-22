@@ -17,14 +17,10 @@ import static spark.Spark.threadPool;
 
 import java.security.Security;
 
-import javax.json.JsonObject;
 import javax.script.ScriptEngine;
 import javax.script.ScriptEngineManager;
 import javax.script.ScriptException;
 
-import org.apache.log4j.Level;
-import org.apache.log4j.LogManager;
-import org.apache.log4j.Logger;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
 import integration.Dispatcher;
@@ -114,7 +110,7 @@ public class API {
         	
         	get("/", (request, response) -> "Blockchain-supported Ledgering API for Decentralized Applications - v1.0");
         	
-            path("/contract", () -> {
+            path("/:channel/contract", () -> {
                 get("/:cid", (req, rsp) -> getContract(req, rsp));
                 get("/:cid/records", (req, rsp) -> getRecordsList(req, rsp));
                 get("/:cid/records/:key", (req, rsp) -> getRecordDetails(req, rsp));
@@ -149,7 +145,7 @@ public class API {
 			e.printStackTrace();
 		}
     	
-
+    	
     	if (result == null) {
     		
     		rsp.status(404);
@@ -200,6 +196,7 @@ public class API {
 	
 	private static String getRecordsList(Request req, Response rsp) {
 
+		String channel = req.params(":channel");
     	String cid = req.params(":cid");
 		// execute action
     	//TODO
@@ -217,7 +214,7 @@ public class API {
 	
 	private static String getRecordDetails(Request req, Response rsp) {
 		
-
+		String channel = req.params(":channel");
     	String cid = req.params(":cid");
     	String key = req.params(":key");
 		// execute action
@@ -236,6 +233,7 @@ public class API {
 	
 	private static String getInvokeOperation(Request req, Response rsp) {
 		
+		String channel = req.params(":channel");
 		String cid = req.params(":cid");
 		// execute action
 		// TODO
@@ -286,6 +284,7 @@ public class API {
 	
 	private static String postInvokeOperation(Request req, Response rsp) {
 
+		String channel = req.params(":channel");
     	String cid = req.params(":cid");
     	String oid = req.queryParams("operationId");
     	String tx = req.queryParams("transactionData");

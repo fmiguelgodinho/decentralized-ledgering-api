@@ -64,14 +64,9 @@ public class Dispatcher {
         // set user context
         client.setUserContext(appUser);
 
-        // get HFC first channel using the client
+        // init channel map
         channels = new HashMap<String,Pair<Channel, NodeConnection[]>>();
-        Channel firstChannel = initChannel(channelName, nodesOnChannel);
-        channels.put(channelName, new Pair(firstChannel, nodesOnChannel));
-        log.info("Channel: " + firstChannel.getName());
-        
-        // set current channel
-        currChannel = channelName;
+        this.changeChannel(channelName, nodesOnChannel);
     }
     
     // use HLFJavaClient.CHAINCODE_QUERY_OPERATION or HLFJavaClient.CHAINCODE_INVOKE_OPERATION
