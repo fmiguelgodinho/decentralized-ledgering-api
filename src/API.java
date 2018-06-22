@@ -17,6 +17,9 @@ import static spark.Spark.threadPool;
 
 import java.security.Security;
 
+import org.apache.log4j.Level;
+import org.apache.log4j.LogManager;
+import org.apache.log4j.Logger;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
 import integration.Dispatcher;
@@ -89,7 +92,8 @@ public class API {
     		HLF_INTEGRATION_CLIENT_ORG, 
     		HLF_INTEGRATION_CHANNEL_NAME,
     		HLF_INTEGRATION_CHANNEL_NODES
-    	);
+    	);       
+
 
         // setup routing		
         path("/api", () -> {
@@ -130,6 +134,18 @@ public class API {
 		// execute action
 		//TODO
     	
+    	String result = null;
+    	try {
+			result = dpt.callChaincodeFunction(
+					Dispatcher.CHAINCODE_QUERY_OPERATION, 
+					cid, 
+					"getContractDefinition", 
+					new String[] {}								// empty args
+			);
+		} catch (InterruptedException e) {
+			e.printStackTrace();
+		}
+    	
 		// return html
     	rsp.status(200);
     	rsp.type("text/html");
@@ -137,8 +153,8 @@ public class API {
 		    h3("Contract ID: " + cid),
 		    div().with(
 		    	p("Below is all metadata related with the contract:")
-		    )
-//			      div().with(
+		    ),
+		    div(result)
 //			          model.getAllPosts().stream().map((post) ->
 //			                div().with(
 //			                        h2(post.getTitle()),
@@ -148,7 +164,7 @@ public class API {
 //			                        )
 //			                )
 //			          ).collect(Collectors.toList())
-//			      )
+//		    )
 		).render();
 	}
 	

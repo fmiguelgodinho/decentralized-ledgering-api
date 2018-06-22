@@ -75,11 +75,14 @@ public class Dispatcher {
     }
     
     // use HLFJavaClient.CHAINCODE_QUERY_OPERATION or HLFJavaClient.CHAINCODE_INVOKE_OPERATION
-    public void callChaincodeFunction(int op, String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws InterruptedException {
+    public String callChaincodeFunction(int op, String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws InterruptedException {
+    	
+    	String rsp = null;
+    	
     	try {
     		// call corresponding chaincode operation
     		if (op == CHAINCODE_QUERY_OPERATION) {
-    			query(chaincodeId, chaincodeFn, chaincodeArgs);
+    			rsp = query(chaincodeId, chaincodeFn, chaincodeArgs);
     		} else if (op == CHAINCODE_INVOKE_OPERATION) {
     			invoke(chaincodeId, chaincodeFn, chaincodeArgs);
     		} else {
@@ -91,6 +94,8 @@ public class Dispatcher {
 		} finally {
 			Thread.sleep(CHAINCODE_CALL_INTERVAL_MS);
 		}
+    	
+    	return rsp;
     }
     
     public void changeChannel(String newChannelName, NodeConnection[] nodesOnChannel) throws InvalidArgumentException, TransactionException {
@@ -110,7 +115,7 @@ public class Dispatcher {
     	currChannel = newChannelName;
     }
 
-    private void query(String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws ProposalException, InvalidArgumentException {
+    private String query(String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws ProposalException, InvalidArgumentException {
     	
         // get channel instance from client
         Channel channel = channels.get(currChannel).getLeft();
@@ -130,10 +135,19 @@ public class Dispatcher {
         log.info("Sending query request, function '" + chaincodeFn + "' with arguments ['" + String.join("', '", chaincodeArgs) + "'], through chaincode '" + chaincodeId + "'...");
         
         // display response
+        String stringResponse = null, prevResponse = null;
         for (ProposalResponse pres : res) {
-            String stringResponse = new String(pres.getChaincodeActionResponsePayload());
+        	prevResponse = stringResponse;
+            stringResponse = new String(pres.getChaincodeActionResponsePayload());
             log.info(stringResponse);
+            
+            // redundant check to ensure nodes all return the same thing
+            if (prevResponse != null && !stringResponse.equals(prevResponse)) {
+            	throw new RuntimeException("Incoherent response from nodes!!!");
+            }
         }
+        
+        return stringResponse;
 
     }
     
