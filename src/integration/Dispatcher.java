@@ -11,6 +11,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
 
+import org.apache.commons.configuration2.Configuration;
 import org.apache.log4j.Logger;
 import org.hyperledger.fabric.sdk.ChaincodeID;
 import org.hyperledger.fabric.sdk.Channel;
@@ -34,10 +35,6 @@ public class Dispatcher {
 	
 	public static final int CHAINCODE_QUERY_OPERATION = 0;
 	public static final int CHAINCODE_INVOKE_OPERATION = 1;
-	public static int CHAINCODE_CALL_INTERVAL_MS = 500;
-	
-	public static final String BLOCKCHAIN_NEGOTIATION_MODE = "TLS";
-	public static final String BLOCKCHAIN_SSL_PROVIDER = "openSSL";
 	
 	
     private static final Logger log = Logger.getLogger(Dispatcher.class);
@@ -45,8 +42,11 @@ public class Dispatcher {
     private HFClient client;
     private Map<String,Pair<Channel, NodeConnection[]>> channels;
     private String currChannel;
+    private Configuration cfg;
     
-    public Dispatcher(String crtPath, String keyPath, String username, String mspId, String org, String channelName, NodeConnection[] nodesOnChannel) throws Exception {
+    public Dispatcher(Configuration cfg, NodeConnection[] nodesOnChannel) throws Exception {
+    	
+    	this.cfg = cfg;
     	
 //      // create fabric-ca client
 //      HFCAClient caClient = getHfCaClient("http://localhost:7054", null);
@@ -56,7 +56,13 @@ public class Dispatcher {
 //      log.info(admin);
 
         // register and enroll new user
-        HLFUser appUser = getUser(crtPath, keyPath, username, mspId, org);
+        HLFUser appUser = getUser(
+    		cfg.getString("hlf.client.crtPath"), 
+    		cfg.getString("hlf.client.keyPath"),
+        	cfg.getString("hlf.client.username"), 
+        	cfg.getString("hlf.client.mspid"), 
+        	cfg.getString("hlf.client.org")
+         );
         log.info(appUser);
        
         // get HFC client instance
@@ -66,7 +72,10 @@ public class Dispatcher {
 
         // init channel map
         channels = new HashMap<String,Pair<Channel, NodeConnection[]>>();
-        this.setChannel(channelName, nodesOnChannel);
+        this.setChannel(
+    		cfg.getString("hlf.channelName"),
+    		nodesOnChannel
+        );
     }
     
     // use HLFJavaClient.CHAINCODE_QUERY_OPERATION or HLFJavaClient.CHAINCODE_INVOKE_OPERATION
@@ -87,7 +96,7 @@ public class Dispatcher {
 		} catch (ProposalException | InvalidArgumentException e) {
 			e.printStackTrace();
 		} finally {
-			Thread.sleep(CHAINCODE_CALL_INTERVAL_MS);
+			Thread.sleep(cfg.getLong("hlf.chaincode.callInterval"));
 		}
     	
     	return rsp;
@@ -202,8 +211,8 @@ public class Dispatcher {
             
             Properties secPeerProperties = new Properties();
             secPeerProperties.setProperty("hostnameOverride", nodesOnChannel[i].name);
-            secPeerProperties.setProperty("sslProvider", BLOCKCHAIN_SSL_PROVIDER);
-            secPeerProperties.setProperty("negotiationType", BLOCKCHAIN_NEGOTIATION_MODE);
+            secPeerProperties.setProperty("sslProvider", cfg.getString("hlf.communication.sslProvider"));
+            secPeerProperties.setProperty("negotiationType", cfg.getString("hlf.communication.negotiationMode"));
             secPeerProperties.setProperty("pemFile", tlsCrt.getAbsolutePath());
             
             if (nodesOnChannel[i].type == NodeConnection.PEER_TYPE) {

@@ -88,12 +88,7 @@ public class API {
 		
         // initialize dispatcher
         dpt = new Dispatcher(
-        	cfg.getString("hlf.client.crtPath"), 
-    		cfg.getString("hlf.client.keyPath"), 
-        	cfg.getString("hlf.client.username"),
-        	cfg.getString("hlf.client.mspid"),
-        	cfg.getString("hlf.client.org"),
-        	cfg.getString("hlf.channelName"),
+        	cfg,
     		HLF_INTEGRATION_CHANNEL_NODES
     	);     
 
