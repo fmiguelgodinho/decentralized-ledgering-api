@@ -22,7 +22,11 @@ import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mongodb.MongoClient;
+import com.mongodb.MongoClientURI;
 
+import core.ContractInterpreter;
+import core.RBEngine;
 import integration.Dispatcher;
 import spark.Request;
 import spark.Response;
@@ -48,6 +52,11 @@ public class API {
 	public static final String HLF_INTEGRATION_CLIENT_KEY_PATH = "../../bootstrap/crypto-config/peerOrganizations/blockchain-a.com/users/User1@blockchain-a.com/msp/keystore/User1@blockchain-a.com-priv.pem";
 	public static final String HLF_INTEGRATION_CHANNEL_NAME = "mainchannel";	// TODO: channel can be defined in contracts
 
+	public static final String MONGODB_ADDRESS = "mongodb://localhost:27017";
+	public static final String MONGODB_DATABASE_NAME = "beckie";
+	public static final String MONGODB_CONTRACT_COLLECTION = "smart-contracts";
+//	public static final String MONGODB_BROKERING_COLLECION = "";
+	
 	// TODO: nodes can be specified on contract
 	public static NodeConnection[] HLF_INTEGRATION_CHANNEL_NODES = new NodeConnection[] {
 		new NodeConnection(NodeConnection.PEER_TYPE, "peer0.blockchain-a.com", "localhost", 7051, "../../bootstrap/crypto-config/peerOrganizations/blockchain-a.com/tlsca/tlsca.blockchain-a.com-cert.pem"),
@@ -61,8 +70,22 @@ public class API {
 	
 	
 	private static Dispatcher dpt;
+	private static ContractInterpreter ci;
+	private static RBEngine rbe;
 	
 	public static void main(String[] args) throws Exception {
+		
+		// set up API configurations
+		setUpConfigurations();
+		
+		// start internal modules of the API
+		startInternalModules();
+		
+		// start the REST service itself
+		startRESTServer();
+	}
+	
+	private static void setUpConfigurations() {
 		
 		// restrict logging
 		ch.qos.logback.classic.Logger root = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(ch.qos.logback.classic.Logger.ROOT_LOGGER_NAME);
@@ -70,7 +93,30 @@ public class API {
 		
 		// set the security provider...
 		Security.addProvider(new BouncyCastleProvider());
+	}
+	
+	private static void startInternalModules() throws Exception {
 		
+        // initialize dispatcher
+        dpt = new Dispatcher(
+    		HLF_INTEGRATION_CLIENT_CRT_PATH, 
+    		HLF_INTEGRATION_CLIENT_KEY_PATH, 
+    		HLF_INTEGRATION_CLIENT_USERNAME, 
+    		HLF_INTEGRATION_CLIENT_MSPID, 
+    		HLF_INTEGRATION_CLIENT_ORG, 
+    		HLF_INTEGRATION_CHANNEL_NAME,
+    		HLF_INTEGRATION_CHANNEL_NODES
+    	);     
+
+        // initialize mongo client
+		MongoClient dbClient = new MongoClient(new MongoClientURI(MONGODB_ADDRESS));
+		
+		// initialize contract interpreter and representative broker engine
+		rbe = new RBEngine(dbClient);
+		ci = new ContractInterpreter(dbClient);
+	}
+	
+	private static void startRESTServer() {
 		// set port, https and threadpool config
         port(
     		API_PORT
@@ -87,17 +133,6 @@ public class API {
     		API_SSL_TRUSTSTORE_PW, 
     		true
     	);
-        
-        // initialize dispatcher
-        dpt = new Dispatcher(
-    		HLF_INTEGRATION_CLIENT_CRT_PATH, 
-    		HLF_INTEGRATION_CLIENT_KEY_PATH, 
-    		HLF_INTEGRATION_CLIENT_USERNAME, 
-    		HLF_INTEGRATION_CLIENT_MSPID, 
-    		HLF_INTEGRATION_CLIENT_ORG, 
-    		HLF_INTEGRATION_CHANNEL_NAME,
-    		HLF_INTEGRATION_CHANNEL_NODES
-    	);       
 
         // setup routing		
         path("/api", () -> {
@@ -126,7 +161,6 @@ public class API {
                 // missing deploycontract
             });
         });
-        
 	}
 	
 	/* ---------------------- API METHODS --------------------- */

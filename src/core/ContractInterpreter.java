@@ -1,18 +1,19 @@
 package core;
 
-import java.util.HashMap;
-import java.util.Map;
+import java.net.UnknownHostException;
 
-import core.dto.Contract;
+import com.mongodb.MongoClient;
 
 public class ContractInterpreter {
 	
-	private Map<String, Contract> contracts;	// list of contracts loaded in memory (CID -> contract)
+//	private Map<String, Contract> contracts;	// list of contracts loaded in memory (CID -> contract)
 												// if a contract isn't here, this interpreter will fetch it from the BC
 	
+	private MongoClient db;
 	
-	public ContractInterpreter() {
-		contracts = new HashMap<String, Contract>();
+	public ContractInterpreter(MongoClient db) throws UnknownHostException {
+//		contracts = new HashMap<String, Contract>();
+		this.db = db;
 	}
 
 }
