@@ -15,13 +15,13 @@ import static spark.Spark.post;
 import static spark.Spark.secure;
 import static spark.Spark.threadPool;
 
+import java.io.IOException;
 import java.security.Security;
 
-import javax.script.ScriptEngine;
-import javax.script.ScriptEngineManager;
-import javax.script.ScriptException;
-
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import integration.Dispatcher;
 import spark.Request;
@@ -64,6 +64,10 @@ public class API {
 	
 	public static void main(String[] args) throws Exception {
 		
+		// restrict logging
+		ch.qos.logback.classic.Logger root = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(ch.qos.logback.classic.Logger.ROOT_LOGGER_NAME);
+	    root.setLevel(ch.qos.logback.classic.Level.INFO);
+		
 		// set the security provider...
 		Security.addProvider(new BouncyCastleProvider());
 		
@@ -94,7 +98,6 @@ public class API {
     		HLF_INTEGRATION_CHANNEL_NAME,
     		HLF_INTEGRATION_CHANNEL_NODES
     	);       
-
 
         // setup routing		
         path("/api", () -> {
@@ -130,8 +133,10 @@ public class API {
 
 	private static String getContract(Request req, Response rsp) {
 		
+		// parse parameters
     	String cid = req.params(":cid");
     	
+    	// query the chaincode
     	String result = null;
     	try {
 			result = dpt.callChaincodeFunction(
@@ -145,7 +150,7 @@ public class API {
 			e.printStackTrace();
 		}
     	
-    	
+    	// if not found
     	if (result == null) {
     		
     		rsp.status(404);
@@ -158,18 +163,15 @@ public class API {
     		).render();
     	}
     	
-
-		String prettyPrintedJson = null;
+    	// found. return json in pretty print
 		try {
-			// pretty print
-			ScriptEngine se = new ScriptEngineManager().getEngineByName("JavaScript");
-			se.put("jsonString", result);
-			se.eval("result = JSON.stringify(JSON.parse(jsonString), null, 2)");
-			prettyPrintedJson = (String) se.get("result");
-		} catch (ScriptException e) {
+			ObjectMapper mapper = new ObjectMapper();
+			JsonNode resultObject = mapper.readTree(result);
+	    	result = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(resultObject);
+		} catch (IOException e) {
 			e.printStackTrace();
 		}
-    	
+
 		// return html
     	rsp.status(200);
     	rsp.type("text/html");
@@ -178,19 +180,7 @@ public class API {
 		    div().with(
 		    	p("Below is all metadata related with the contract:")
 		    ),
-		    div(
-		    	prettyPrintedJson
-		    )
-//			          model.getAllPosts().stream().map((post) ->
-//			                div().with(
-//			                        h2(post.getTitle()),
-//			                        p(post.getContent()),
-//			                        ul().with(post.getCategories().stream().map((category) ->
-//			                              li(category)).collect(Collectors.toList())
-//			                        )
-//			                )
-//			          ).collect(Collectors.toList())
-//		    )
+		    div(result)
 		).render();
 	}
 	
@@ -208,6 +198,17 @@ public class API {
 		    h3("Contract ID: " + cid),
 		    div().with(
 		    	p("Below is a list of records related with the contract:")
+
+//		          model.getAllPosts().stream().map((post) ->
+//		                div().with(
+//		                        h2(post.getTitle()),
+//		                        p(post.getContent()),
+//		                        ul().with(post.getCategories().stream().map((category) ->
+//		                              li(category)).collect(Collectors.toList())
+//		                        )
+//		                )
+//		          ).collect(Collectors.toList())
+//	    )
 		    )
 		).render();
 	}
