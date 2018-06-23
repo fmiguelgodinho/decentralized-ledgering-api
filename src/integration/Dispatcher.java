@@ -66,7 +66,7 @@ public class Dispatcher {
 
         // init channel map
         channels = new HashMap<String,Pair<Channel, NodeConnection[]>>();
-        this.changeChannel(channelName, nodesOnChannel);
+        this.setChannel(channelName, nodesOnChannel);
     }
     
     // use HLFJavaClient.CHAINCODE_QUERY_OPERATION or HLFJavaClient.CHAINCODE_INVOKE_OPERATION
@@ -93,7 +93,18 @@ public class Dispatcher {
     	return rsp;
     }
     
-    public void changeChannel(String newChannelName, NodeConnection[] nodesOnChannel) throws InvalidArgumentException, TransactionException {
+    public void changeChannel(String channelName) throws IllegalArgumentException {
+    	
+    	if (!channels.containsKey(channelName)) {
+    		throw new IllegalArgumentException("No such channel exists: " + channelName);
+    	}
+    	
+    	// set current channel
+    	currChannel = channelName;
+    	
+    }
+    
+    public void setChannel(String newChannelName, NodeConnection[] nodesOnChannel) throws InvalidArgumentException, TransactionException {
     	
     	Pair<Channel,NodeConnection[]> existingChannelCfg = channels.get(newChannelName);
     	

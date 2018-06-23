@@ -15,9 +15,14 @@ import static spark.Spark.post;
 import static spark.Spark.secure;
 import static spark.Spark.threadPool;
 
+import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.security.Security;
 
+import org.apache.commons.configuration2.Configuration;
+import org.apache.commons.configuration2.builder.fluent.Configurations;
+import org.apache.commons.configuration2.ex.ConfigurationException;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -34,28 +39,8 @@ import util.NodeConnection;
 
 public class API {
 	
-
-	public static final int API_PORT = 8080;
-	public static final int API_THREAD_POOL_MAX = 8;
-	public static final int API_THREAD_POOL_MIN = 2;
-	public static final int API_THREAD_POOL_TIMEOUT_MS = 30000;
 	
-	private static final String API_SSL_KEYSTORE_PATH = "crypto/server.keystore";
-	private static final String API_SSL_TRUSTSTORE_PATH = "crypto/server.truststore";
-	private static final String API_SSL_KEYSTORE_PW = "sparkmeup";
-	private static final String API_SSL_TRUSTSTORE_PW = "sparkmeup";
-	
-	public static final String HLF_INTEGRATION_CLIENT_USERNAME = "User1@blockchain-a.com";
-	public static final String HLF_INTEGRATION_CLIENT_ORG = "PeersA";
-	public static final String HLF_INTEGRATION_CLIENT_MSPID = "PeersAMSP";
-	public static final String HLF_INTEGRATION_CLIENT_CRT_PATH = "../../bootstrap/crypto-config/peerOrganizations/blockchain-a.com/users/User1@blockchain-a.com/msp/signcerts/User1@blockchain-a.com-cert.pem";
-	public static final String HLF_INTEGRATION_CLIENT_KEY_PATH = "../../bootstrap/crypto-config/peerOrganizations/blockchain-a.com/users/User1@blockchain-a.com/msp/keystore/User1@blockchain-a.com-priv.pem";
-	public static final String HLF_INTEGRATION_CHANNEL_NAME = "mainchannel";	// TODO: channel can be defined in contracts
-
-	public static final String MONGODB_ADDRESS = "mongodb://localhost:27017";
-	public static final String MONGODB_DATABASE_NAME = "beckie";
-	public static final String MONGODB_CONTRACT_COLLECTION = "smart-contracts";
-//	public static final String MONGODB_BROKERING_COLLECION = "";
+	public static final String CONFIG_FILEPATH = "conf/config.properties";
 	
 	// TODO: nodes can be specified on contract
 	public static NodeConnection[] HLF_INTEGRATION_CHANNEL_NODES = new NodeConnection[] {
@@ -68,7 +53,7 @@ public class API {
 		new NodeConnection(NodeConnection.ORDERER_TYPE, "orderer0.consensus.com", "localhost", 7050, "../../bootstrap/crypto-config/ordererOrganizations/consensus.com/tlsca/tlsca.consensus.com-cert.pem")
 	};
 	
-	
+	private static Configuration cfg;
 	private static Dispatcher dpt;
 	private static ContractInterpreter ci;
 	private static RBEngine rbe;
@@ -85,7 +70,11 @@ public class API {
 		startRESTServer();
 	}
 	
-	private static void setUpConfigurations() {
+	private static void setUpConfigurations() throws FileNotFoundException, IOException, ConfigurationException {
+		
+		// load config file
+		Configurations cfggen = new Configurations();
+		cfg = cfggen.properties(new File(CONFIG_FILEPATH));
 		
 		// restrict logging
 		ch.qos.logback.classic.Logger root = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(ch.qos.logback.classic.Logger.ROOT_LOGGER_NAME);
@@ -99,39 +88,39 @@ public class API {
 		
         // initialize dispatcher
         dpt = new Dispatcher(
-    		HLF_INTEGRATION_CLIENT_CRT_PATH, 
-    		HLF_INTEGRATION_CLIENT_KEY_PATH, 
-    		HLF_INTEGRATION_CLIENT_USERNAME, 
-    		HLF_INTEGRATION_CLIENT_MSPID, 
-    		HLF_INTEGRATION_CLIENT_ORG, 
-    		HLF_INTEGRATION_CHANNEL_NAME,
+        	cfg.getString("hlf.client.crtPath"), 
+    		cfg.getString("hlf.client.keyPath"), 
+        	cfg.getString("hlf.client.username"),
+        	cfg.getString("hlf.client.mspid"),
+        	cfg.getString("hlf.client.org"),
+        	cfg.getString("hlf.channelName"),
     		HLF_INTEGRATION_CHANNEL_NODES
     	);     
 
         // initialize mongo client
-		MongoClient dbClient = new MongoClient(new MongoClientURI(MONGODB_ADDRESS));
+		MongoClient dbClient = new MongoClient(new MongoClientURI(cfg.getString("mongo.address")));
 		
 		// initialize contract interpreter and representative broker engine
 		rbe = new RBEngine(dbClient);
-		ci = new ContractInterpreter(dbClient);
+		ci = new ContractInterpreter(dbClient, dpt);
 	}
 	
 	private static void startRESTServer() {
 		// set port, https and threadpool config
         port(
-    		API_PORT
+        	cfg.getInt("api.port")
     	);
         threadPool(
-    		API_THREAD_POOL_MAX, 
-    		API_THREAD_POOL_MIN, 
-    		API_THREAD_POOL_TIMEOUT_MS
+    		cfg.getInt("api.threadPool.max"), 
+    		cfg.getInt("api.threadPool.min"), 
+    		cfg.getInt("api.threadPool.timeout")
         );
         secure(
-    		API_SSL_KEYSTORE_PATH, 
-    		API_SSL_KEYSTORE_PW, 
-    		API_SSL_TRUSTSTORE_PATH, 
-    		API_SSL_TRUSTSTORE_PW, 
-    		true
+    		cfg.getString("api.ssl.keystorePath"), 
+    		cfg.getString("api.ssl.keystorePw"), 
+    		cfg.getString("api.ssl.truststorePath"),
+    		cfg.getString("api.ssl.truststorePw"),
+    		cfg.getBoolean("api.ssl.muthualAuth")
     	);
 
         // setup routing		
