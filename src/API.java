@@ -97,7 +97,7 @@ public class API {
 		
 		// initialize contract interpreter and representative broker engine
 		rbe = new RBEngine(dbClient);
-		ci = new ContractInterpreter(dbClient, dpt);
+		ci = new ContractInterpreter(cfg, dbClient, dpt);
 	}
 	
 	private static void startRESTServer() {
@@ -152,21 +152,11 @@ public class API {
 	private static String getContract(Request req, Response rsp) {
 		
 		// parse parameters
+		String channel = req.params(":channel");
     	String cid = req.params(":cid");
     	
-    	// query the chaincode
-    	String result = null;
-    	try {
-			result = dpt.callChaincodeFunction(
-					Dispatcher.CHAINCODE_QUERY_OPERATION, 
-					cid, 
-					"getContractDefinition", 
-					new String[] {}								// empty args
-			);
-			
-		} catch (InterruptedException e) {
-			e.printStackTrace();
-		}
+    	// delegate get contract to interpreter
+    	String result = ci.getContractRaw(channel, cid);
     	
     	// if not found
     	if (result == null) {
