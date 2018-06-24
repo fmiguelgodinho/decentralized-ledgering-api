@@ -136,31 +136,34 @@ public class API {
         	
         	get("/", (request, response) -> "Blockchain-supported Ledgering API for Decentralized Applications - v1.0");
         	
-            path("/:channel/contract", () -> {
+            path("/:channel", () -> {
             	
             	// functions for deploying contracts (should only be available to providers)
-                get("/", (req, rsp) -> getDeployContract(req, rsp));
-                post("/", (req, rsp) -> {
+                get("/deploy", (req, rsp) -> getDeployContract(req, rsp));
+                post("/deploy", (req, rsp) -> {
                 	String newKey = postDeployContract(req, rsp);
-                	rsp.redirect(newKey);
+                	rsp.redirect("/api/" + req.params(":channel") + "/contract/" + newKey);
                 	return null;
                 });
                 
-                // get contract specification
-                get("/:cid", (req, rsp) -> getContract(req, rsp));
+                path("/contract", () -> {
                 
-                // get records stored in contract
-                get("/:cid/records", (req, rsp) -> getRecordsList(req, rsp));
-                
-                // get specific record
-                get("/:cid/records/:key", (req, rsp) -> getRecordDetails(req, rsp));
-                
-                // invoke contract operation
-                get("/:cid/invoke", (req, rsp) -> getInvokeOperation(req, rsp));
-                post("/:cid/invoke", (req, rsp) -> {
-                	String newKey = postInvokeOperation(req, rsp);
-                	rsp.redirect("records/" + newKey);
-                	return null;
+	                // get contract specification
+	                get("/:cid", (req, rsp) -> getContract(req, rsp));
+	                
+	                // get records stored in contract
+	                get("/:cid/records", (req, rsp) -> getRecordsList(req, rsp));
+	                
+	                // get specific record
+	                get("/:cid/records/:key", (req, rsp) -> getRecordDetails(req, rsp));
+	                
+	                // invoke contract operation
+	                get("/:cid/invoke", (req, rsp) -> getInvokeOperation(req, rsp));
+	                post("/:cid/invoke", (req, rsp) -> {
+	                	String newKey = postInvokeOperation(req, rsp);
+	                	rsp.redirect("/api/" + req.params(":channel") + "/contract/" + req.params(":cid") + "/records/" + newKey);
+	                	return null;
+	                });
                 });
             });
         });
@@ -276,7 +279,7 @@ public class API {
 		    	br(),
 		    	form()
 		    	.withMethod("POST")
-		    	.withAction("invoke-operation")
+		    	.withAction("invoke")
 		    	.with(
 				    	// operation id
 				    	span("Operation to execute: "),
@@ -340,7 +343,7 @@ public class API {
 		    	br(),
 		    	form()
 		    	.withMethod("POST")
-		    	.withAction("invoke-operation")
+		    	.withAction("deploy")
 		    	.with(
 				    	// contract id
 				    	span("Contract ID: "),
@@ -391,7 +394,17 @@ public class API {
 	}
 	
 	private static String postDeployContract(Request req, Response rsp) {
-		return null;
+		
+		String channel = req.params(":channel");
+    	String cid = req.queryParams("contractId");
+    	String cver = req.queryParams("contractVersion");
+    	String cfile = req.queryParams("contractFile");
+    	String cspecs = req.queryParams("contractSpecs");
+    	
+    	// TODO
+    	String key = "xcc";// REMOVE
+    	
+    	return key;
 	}
 	
 	private static boolean shouldReturnHtml(Request request) {
