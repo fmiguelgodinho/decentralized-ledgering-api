@@ -8,8 +8,12 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import org.apache.commons.configuration2.Configuration;
 import org.apache.log4j.Logger;
@@ -17,6 +21,7 @@ import org.hyperledger.fabric.sdk.ChaincodeID;
 import org.hyperledger.fabric.sdk.Channel;
 import org.hyperledger.fabric.sdk.EventHub;
 import org.hyperledger.fabric.sdk.HFClient;
+import org.hyperledger.fabric.sdk.InstallProposalRequest;
 import org.hyperledger.fabric.sdk.Orderer;
 import org.hyperledger.fabric.sdk.Peer;
 import org.hyperledger.fabric.sdk.ProposalResponse;
@@ -29,6 +34,7 @@ import org.hyperledger.fabric.sdk.exception.TransactionException;
 import org.hyperledger.fabric.sdk.security.CryptoSuite;
 
 import util.Pair;
+import util.Util;
 import util.NodeConnection;
 
 public class Dispatcher {
@@ -90,10 +96,10 @@ public class Dispatcher {
     		} else if (op == CHAINCODE_INVOKE_OPERATION) {
     			invoke(chaincodeId, chaincodeFn, chaincodeArgs);
     		} else {
-    			throw new IllegalArgumentException("Unrecognized operation: " + op + ". Use HLFJavaClient.CHAINCODE_QUERY_OPERATION or HLFJavaClient.CHAINCODE_INVOKE_OPERATION!");
+    			throw new IllegalArgumentException("Unrecognized operation: " + op);
     		}
 			
-		} catch (ProposalException | InvalidArgumentException e) {
+		} catch (ProposalException | InvalidArgumentException | ExecutionException | TimeoutException e) {
 			e.printStackTrace();
 		} finally {
 			Thread.sleep(cfg.getLong("hlf.chaincode.callInterval"));
@@ -129,8 +135,60 @@ public class Dispatcher {
     	// set current channel
     	currChannel = newChannelName;
     }
+    
+    // has to be admin
+    private void install(String chaincodeId, String chaincodeVersion, File chaincodeFile, String chaincodePathPrefix) throws InvalidArgumentException, IOException, ProposalException {
+    	
+    	Collection<ProposalResponse> successful = new LinkedList<ProposalResponse>();
+    	Collection<ProposalResponse> failed = new LinkedList<ProposalResponse>();
+    	
+        // get channel instance from client
+        Channel channel = channels.get(currChannel).getLeft();
+        
+        // create install proposal request
+    	InstallProposalRequest ipr = client.newInstallProposalRequest();
+    	
+        // build cc id providing the chaincode name
+        ChaincodeID CCId = ChaincodeID.newBuilder().setName(chaincodeId).build();
+        ipr.setChaincodeID(CCId);
+        ipr.setChaincodeVersion(chaincodeVersion);
+        
+        // set chaincode input stream
+        ipr.setChaincodeInputStream(
+        	Util.generateTarGzInputStream(
+        			chaincodeFile, 
+        			chaincodePathPrefix
+        	)
+        );
+        
+        // TODO: MAYBE SEND ONLY TO PEERS WHO IS ADMIN FOR
+        Collection<ProposalResponse> res = client.sendInstallProposal(ipr, channel.getPeers());
+
+        for (ProposalResponse pres : res) {
+            if (pres.getStatus() == ProposalResponse.Status.SUCCESS) {
+                log.info("Successful installed proposal response Txid: " + pres.getTransactionID() + " from peer " + pres.getPeer().getName());
+                successful.add(pres);
+            } else {
+                failed.add(pres);
+            }
+        }
+
+        log.info("Received " + res.size() + " install proposal responses. Successful: " + successful.size() + " . Failed: " + failed.size());
+
+//        if (failed.size() > 0) {
+//            ProposalResponse first = failed.iterator().next();
+//            fail("Not enough endorsers for install :" + successful.size() + ".  " + first.getMessage());
+//        }
+        
+        
+        
+    }
 
     private String query(String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws ProposalException, InvalidArgumentException {
+    	
+
+    	Collection<ProposalResponse> successful = new LinkedList<ProposalResponse>();
+    	Collection<ProposalResponse> failed = new LinkedList<ProposalResponse>();
     	
         // get channel instance from client
         Channel channel = channels.get(currChannel).getLeft();
@@ -145,28 +203,42 @@ public class Dispatcher {
         // CC function to be called
         qpr.setFcn(chaincodeFn);
         qpr.setArgs(chaincodeArgs);
-        Collection<ProposalResponse> res = channel.queryByChaincode(qpr);
-        
+        Collection<ProposalResponse> responses = channel.queryByChaincode(qpr, channel.getPeers());
+
         log.info("Sending query request, function '" + chaincodeFn + "' with arguments ['" + String.join("', '", chaincodeArgs) + "'], through chaincode '" + chaincodeId + "'...");
         
-        // display response
-        String stringResponse = null, prevResponse = null;
-        for (ProposalResponse pres : res) {
-        	prevResponse = stringResponse;
-            stringResponse = new String(pres.getChaincodeActionResponsePayload());
-            log.info(stringResponse);
-            
-            // redundant check to ensure nodes all return the same thing
-            if (prevResponse != null && !stringResponse.equals(prevResponse)) {
-            	throw new RuntimeException("Incoherent response from nodes!!!");
-            }
+        // parse responses
+        String responseString = null;
+        for (ProposalResponse rsp : responses) {
+        	
+        	// if valid
+        	if (rsp.isVerified() && rsp.getStatus() == ProposalResponse.Status.SUCCESS) {
+        		responseString = rsp.getProposalResponse().getResponse().getPayload().toStringUtf8();
+        		successful.add(rsp);
+        	} else {
+        		failed.add(rsp);
+        	}
         }
         
-        return stringResponse;
+        log.info("Received " + responses.size() + " query proposal responses. Successful: " + successful.size() + " . Failed: " + failed.size());
+
+        // TODO: improve BFT?
+        
+        // if we obtain a majority of faults => exit error
+        if (failed.size() >= successful.size()) {
+        	throw new RuntimeException("Too many peers failed the response!");
+        }
+        
+        
+        return responseString;
 
     }
     
-    private void invoke(String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws ProposalException, InvalidArgumentException {
+    private void invoke(String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws ProposalException, InvalidArgumentException, InterruptedException, ExecutionException, TimeoutException {
+    	
+
+    	Collection<ProposalResponse> successful = new LinkedList<ProposalResponse>();
+    	Collection<ProposalResponse> failed = new LinkedList<ProposalResponse>();
     	
         // get channel instance from client
         Channel channel = channels.get(currChannel).getLeft();
@@ -181,21 +253,25 @@ public class Dispatcher {
         tpr.setChaincodeID(CCId);
         tpr.setFcn(chaincodeFn);
         tpr.setArgs(chaincodeArgs);
+        tpr.setProposalWaitTime(cfg.getLong("hlf.proposal.timeout"));
         
-        Collection<ProposalResponse> res = channel.sendTransactionProposal(tpr);
+        Collection<ProposalResponse> responses = channel.sendTransactionProposal(tpr);
         
         log.info("Sending transaction proposal, function '" + chaincodeFn + "' with arguments ['" + String.join("', '", chaincodeArgs) + "'], through chaincode '" + chaincodeId + "'...");
         
-        // display response
-        for (ProposalResponse pres : res) {
-            String stringResponse = "Response from endorser is: " + pres.getChaincodeActionResponseStatus();
-            log.info(stringResponse);
+        // parse response
+        for (ProposalResponse rsp : responses) {
+        	// if valid
+        	if (rsp.isVerified() && rsp.getStatus() == ProposalResponse.Status.SUCCESS) {
+        		successful.add(rsp);
+        	} else {
+        		failed.add(rsp);
+        	}
         }
-        
         log.info("Collecting endorsements and sending transaction...");
 
         // send transaction with endorsements
-        channel.sendTransaction(res);
+        channel.sendTransaction(responses).get(cfg.getLong("hlf.transaction.timeout"), TimeUnit.MILLISECONDS);
         log.info("Transaction sent.");
     }
     

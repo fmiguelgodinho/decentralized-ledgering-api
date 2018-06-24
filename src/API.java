@@ -14,11 +14,13 @@ import static spark.Spark.port;
 import static spark.Spark.post;
 import static spark.Spark.secure;
 import static spark.Spark.threadPool;
+import static spark.Spark.before;
 
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.security.Security;
+import java.util.Set;
 
 import org.apache.commons.configuration2.Configuration;
 import org.apache.commons.configuration2.builder.fluent.Configurations;
@@ -117,10 +119,12 @@ public class API {
     		cfg.getString("api.ssl.truststorePw"),
     		cfg.getBoolean("api.ssl.muthualAuth")
     	);
+        
+         
 
         // setup routing		
         path("/api", () -> {
-//        	before((request, response) -> {
+//        	before((req, rsp) -> {
 //        	    boolean authenticated;
 //        	    // ... check if authenticated
 //        	    if (!authenticated) {
@@ -142,7 +146,12 @@ public class API {
                 	rsp.redirect("records/" + newKey);
                 	return null;
                 });
-                // missing deploycontract
+//                get("/", (req, rsp) -> getDeployContract(req, rsp));
+//                post("/", (req, rsp) -> {
+//                	String newKey = postDeployContract(req, rsp);
+//                	rsp.redirect(newKey);
+//                	return null;
+//                });
             });
         });
 	}
@@ -302,6 +311,61 @@ public class API {
     	String key = "3";// REMOVE
     	
     	return key;
+	}
+	
+	
+	private static String getDeployContract(Request req, Response rsp) {
+		
+		String channel = req.params(":channel");
+		// execute action
+		// TODO
+		
+		// return html
+    	rsp.status(200);
+    	rsp.type("text/html");
+		return body().with(
+		    h3("Deploy Contract"),
+		    div().with(
+		    	p("Fill in deployment details. View contract details if you need to know what operations are supported:"),
+		    	br(),
+		    	form()
+		    	.withMethod("POST")
+		    	.withAction("invoke-operation")
+		    	.with(
+				    	// operation id
+				    	span("Operation to execute: "),
+				    	input()
+				    	.withType("text")
+				    	.withId("operationId")
+				    	.withName("operationId")
+				    	.withPlaceholder("e.g. BuyNewCar")
+				    	.isRequired(),
+				    	br(),
+				    	
+				    	// transaction / data details
+				    	div("Transactional data to be used by the operation (JSON format): "),
+				    	textarea()
+				    	.attr("rows", 20)
+				    	.attr("cols", 70)
+				    	.withId("transactionData")
+				    	.withName("transactionData")
+				    	.withPlaceholder("e.g. \n\n{\n\tbrand: 'Fiat',\n\tmodel: '500', \n\tunits: 1"
+				    			+ "\n\tcar-id: ['u8d923-da8313-28mc3-km093i'], \n\tpayment-details: {\n\t\tamount-to-be-payed: '30000',"
+				    			+ "\n\t\tcurrency: 'euro', \n\t\tamount-paying: '30000', \n\t\tpayment-method: 'credit-card',"
+				    			+ "\n\t\tpayment-policy: '100%'\n\t}\n}")
+				    	.isRequired(),
+				    	
+				    	// submit
+				    	br(),
+				    	button("Invoke")
+				    	.withType("submit")
+		    	)
+		    )
+		).render();
+	}
+	
+	private static String postDeployContract(Request req, Response rsp) {
+		return null;
 	}
 	
 	private static boolean shouldReturnHtml(Request request) {
