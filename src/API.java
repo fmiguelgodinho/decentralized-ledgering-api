@@ -29,6 +29,7 @@ import org.apache.commons.configuration2.builder.fluent.Configurations;
 import org.apache.commons.configuration2.ex.ConfigurationException;
 import org.apache.commons.fileupload.FileItem;
 import org.apache.commons.fileupload.FileUploadException;
+import org.apache.commons.fileupload.InvalidFileNameException;
 import org.apache.commons.fileupload.disk.DiskFileItemFactory;
 import org.apache.commons.fileupload.servlet.ServletFileUpload;
 import org.apache.commons.io.FilenameUtils;
@@ -449,6 +450,10 @@ public class API {
 			    } else {
 			    	// file
 			    	String filename = FilenameUtils.getName(item.getName());
+			    	String fileext = FilenameUtils.getExtension(filename);
+			    	if (fileext == null || !fileext.equals(".go")) {
+			    		throw new InvalidFileNameException("Invalid file extension", "Invalid file extension for a contract! (Submit a .go file)");
+			    	}
 			    	chaincodeFile = new File(dfif.getRepository().getAbsolutePath() + "/" + filename);
 			        item.write(chaincodeFile);
 			    }
@@ -462,6 +467,12 @@ public class API {
 	    	rsp.type("text/html");
     		return body().with(
     			h3("Couldn't obtain contract file!")
+    		).render();
+		} catch (InvalidFileNameException f) {
+	    	rsp.status(400);
+	    	rsp.type("text/html");
+    		return body().with(
+    			h3(f.getMessage())
     		).render();
 		} catch (Exception e) {
 			e.printStackTrace();
