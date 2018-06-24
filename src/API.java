@@ -137,21 +137,31 @@ public class API {
         	get("/", (request, response) -> "Blockchain-supported Ledgering API for Decentralized Applications - v1.0");
         	
             path("/:channel/contract", () -> {
+            	
+            	// functions for deploying contracts (should only be available to providers)
+                get("/", (req, rsp) -> getDeployContract(req, rsp));
+                post("/", (req, rsp) -> {
+                	String newKey = postDeployContract(req, rsp);
+                	rsp.redirect(newKey);
+                	return null;
+                });
+                
+                // get contract specification
                 get("/:cid", (req, rsp) -> getContract(req, rsp));
+                
+                // get records stored in contract
                 get("/:cid/records", (req, rsp) -> getRecordsList(req, rsp));
+                
+                // get specific record
                 get("/:cid/records/:key", (req, rsp) -> getRecordDetails(req, rsp));
+                
+                // invoke contract operation
                 get("/:cid/invoke", (req, rsp) -> getInvokeOperation(req, rsp));
                 post("/:cid/invoke", (req, rsp) -> {
                 	String newKey = postInvokeOperation(req, rsp);
                 	rsp.redirect("records/" + newKey);
                 	return null;
                 });
-//                get("/", (req, rsp) -> getDeployContract(req, rsp));
-//                post("/", (req, rsp) -> {
-//                	String newKey = postDeployContract(req, rsp);
-//                	rsp.redirect(newKey);
-//                	return null;
-//                });
             });
         });
 	}
@@ -326,38 +336,54 @@ public class API {
 		return body().with(
 		    h3("Deploy Contract"),
 		    div().with(
-		    	p("Fill in deployment details. View contract details if you need to know what operations are supported:"),
+		    	p("Fill in deployment details:"),
 		    	br(),
 		    	form()
 		    	.withMethod("POST")
 		    	.withAction("invoke-operation")
 		    	.with(
-				    	// operation id
-				    	span("Operation to execute: "),
+				    	// contract id
+				    	span("Contract ID: "),
 				    	input()
 				    	.withType("text")
-				    	.withId("operationId")
-				    	.withName("operationId")
-				    	.withPlaceholder("e.g. BuyNewCar")
+				    	.withId("contractId")
+				    	.withName("contractId")
+				    	.withPlaceholder("e.g. examplecc")
 				    	.isRequired(),
 				    	br(),
 				    	
-				    	// transaction / data details
-				    	div("Transactional data to be used by the operation (JSON format): "),
+				    	// contract id
+				    	span("Contract version: "),
+				    	input()
+				    	.withType("text")
+				    	.withId("contractVersion")
+				    	.withName("contractVersion")
+				    	.withPlaceholder("e.g. 1 (or > 1 if you're upgrading an existing contract)")
+				    	.isRequired(),
+				    	br(),
+				    	
+				    	// contract chaincode (in Golang)
+				    	span("Contract source file: "),
+				    	input()
+				    	.withType("file")
+				    	.withId("contractFile")
+				    	.withName("contractFile")
+				    	.isRequired(),
+				    	br(),
+				    	
+				    	// contract specs
+				    	div("Contract specification to instantiate the contract (has to comply with standard): "),
 				    	textarea()
 				    	.attr("rows", 20)
 				    	.attr("cols", 70)
-				    	.withId("transactionData")
-				    	.withName("transactionData")
-				    	.withPlaceholder("e.g. \n\n{\n\tbrand: 'Fiat',\n\tmodel: '500', \n\tunits: 1"
-				    			+ "\n\tcar-id: ['u8d923-da8313-28mc3-km093i'], \n\tpayment-details: {\n\t\tamount-to-be-payed: '30000',"
-				    			+ "\n\t\tcurrency: 'euro', \n\t\tamount-paying: '30000', \n\t\tpayment-method: 'credit-card',"
-				    			+ "\n\t\tpayment-policy: '100%'\n\t}\n}")
+				    	.withId("contractSpecs")
+				    	.withName("contractSpecs")
+				    	.withPlaceholder("e.g. \n\n{\n\t\"extended-contract-properties\" : { \n\t\t\"consensus-nodes\" : [ ], \n\t\t\"consensus-type\" : \"bft\", \n\t\t\"signature-type\" : \"multisig\", \n\t\t\"signing-nodes\" : [ ] \n\t}, \n\t\"application-specific-properties\" : { \n\t\t\"max-records\" : 100, \n\t\t\"total-records\" : 0 \n\t} \n}")
 				    	.isRequired(),
 				    	
 				    	// submit
 				    	br(),
-				    	button("Invoke")
+				    	button("Deploy")
 				    	.withType("submit")
 		    	)
 		    )
