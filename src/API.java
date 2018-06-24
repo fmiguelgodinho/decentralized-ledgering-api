@@ -451,7 +451,7 @@ public class API {
 			    	// file
 			    	String filename = FilenameUtils.getName(item.getName());
 			    	String fileext = FilenameUtils.getExtension(filename);
-			    	if (fileext == null || !fileext.equals(".go")) {
+			    	if (fileext == null || !fileext.equals("go")) {
 			    		throw new InvalidFileNameException("Invalid file extension", "Invalid file extension for a contract! (Submit a .go file)");
 			    	}
 			    	chaincodeFile = new File(dfif.getRepository().getAbsolutePath() + "/" + filename);
