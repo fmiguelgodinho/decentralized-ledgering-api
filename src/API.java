@@ -14,17 +14,24 @@ import static spark.Spark.port;
 import static spark.Spark.post;
 import static spark.Spark.secure;
 import static spark.Spark.threadPool;
-import static spark.Spark.before;
 
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.security.Security;
-import java.util.Set;
+import java.util.Iterator;
+import java.util.List;
+
+import javax.servlet.MultipartConfigElement;
 
 import org.apache.commons.configuration2.Configuration;
 import org.apache.commons.configuration2.builder.fluent.Configurations;
 import org.apache.commons.configuration2.ex.ConfigurationException;
+import org.apache.commons.fileupload.FileItem;
+import org.apache.commons.fileupload.FileUploadException;
+import org.apache.commons.fileupload.disk.DiskFileItemFactory;
+import org.apache.commons.fileupload.servlet.ServletFileUpload;
+import org.apache.commons.io.FilenameUtils;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -59,6 +66,7 @@ public class API {
 	private static Dispatcher dpt;
 	private static ContractInterpreter ci;
 	private static RBEngine rbe;
+	private static DiskFileItemFactory dfif;
 	
 	public static void main(String[] args) throws Exception {
 		
@@ -84,6 +92,10 @@ public class API {
 		
 		// set the security provider...
 		Security.addProvider(new BouncyCastleProvider());
+		
+		// create a factory for disk-based uploaded file items
+		dfif = new DiskFileItemFactory();
+		dfif.setRepository(new File(cfg.getString("api.fileupload.repositoryPath")));
 	}
 	
 	private static void startInternalModules() throws Exception {
@@ -342,8 +354,10 @@ public class API {
 		    	p("Fill in deployment details:"),
 		    	br(),
 		    	form()
+		    	.withId("deployContractForm")
 		    	.withMethod("POST")
 		    	.withAction("deploy")
+		    	.attr("enctype", "multipart/form-data")
 		    	.with(
 				    	// contract id
 				    	span("Contract ID: "),
@@ -365,6 +379,19 @@ public class API {
 				    	.isRequired(),
 				    	br(),
 				    	
+				    	// contract specs
+				    	div("Contract specification to instantiate the contract (has to comply with standard): "),
+				    	textarea()
+				    	.attr("rows", 20)
+				    	.attr("cols", 70)
+
+				    	.attr("form", "deployContractForm")
+				    	.withId("contractSpecs")
+				    	.withName("contractSpecs")
+				    	.withPlaceholder("e.g. \n\n{\n\t\"extended-contract-properties\" : { \n\t\t\"consensus-nodes\" : [ ], \n\t\t\"consensus-type\" : \"bft\", \n\t\t\"signature-type\" : \"multisig\", \n\t\t\"signing-nodes\" : [ ] \n\t}, \n\t\"application-specific-properties\" : { \n\t\t\"max-records\" : 100, \n\t\t\"total-records\" : 0 \n\t} \n}")
+				    	.isRequired(),
+				    	br(),
+				    	
 				    	// contract chaincode (in Golang)
 				    	span("Contract source file: "),
 				    	input()
@@ -373,19 +400,8 @@ public class API {
 				    	.withName("contractFile")
 				    	.isRequired(),
 				    	br(),
-				    	
-				    	// contract specs
-				    	div("Contract specification to instantiate the contract (has to comply with standard): "),
-				    	textarea()
-				    	.attr("rows", 20)
-				    	.attr("cols", 70)
-				    	.withId("contractSpecs")
-				    	.withName("contractSpecs")
-				    	.withPlaceholder("e.g. \n\n{\n\t\"extended-contract-properties\" : { \n\t\t\"consensus-nodes\" : [ ], \n\t\t\"consensus-type\" : \"bft\", \n\t\t\"signature-type\" : \"multisig\", \n\t\t\"signing-nodes\" : [ ] \n\t}, \n\t\"application-specific-properties\" : { \n\t\t\"max-records\" : 100, \n\t\t\"total-records\" : 0 \n\t} \n}")
-				    	.isRequired(),
-				    	
+
 				    	// submit
-				    	br(),
 				    	button("Deploy")
 				    	.withType("submit")
 		    	)
@@ -394,17 +410,65 @@ public class API {
 	}
 	
 	private static String postDeployContract(Request req, Response rsp) {
+
+		// this request includes a file
+		req.attribute("org.eclipse.jetty.multipartConfig", new MultipartConfigElement("/tmp"));
 		
 		String channel = req.params(":channel");
-    	String cid = req.queryParams("contractId");
-    	String cver = req.queryParams("contractVersion");
-    	String cfile = req.queryParams("contractFile");
-    	String cspecs = req.queryParams("contractSpecs");
+
+		String chaincodeId = null, chaincodeVersion = null, chaincodeSpecs = null;
+		File chaincodeFile = null;
+		
+		ServletFileUpload upload = new ServletFileUpload(dfif);
+		upload.setSizeMax(cfg.getLong("api.fileupload.maxSize"));
+
+		// parse the request
+		try {
+			
+
+			
+			List<FileItem> items = upload.parseRequest(req.raw());
+			
+			// Process the uploaded items
+			Iterator<FileItem> iter = items.iterator();
+			while (iter.hasNext()) {
+			    FileItem item = iter.next();
+			    // parameters
+			    if (item.isFormField()) {
+			        switch (item.getFieldName()) {
+				        case "contractId":
+				        	chaincodeId = item.getString();
+				        	break;
+				        case "contractVersion":
+				        	chaincodeVersion = item.getString();
+				        	break;
+				        case "contractSpecs":
+				        	chaincodeSpecs = item.getString();
+				        	break;
+			        };
+			    } else {
+			    	// file
+			    	String filename = FilenameUtils.getName(item.getName());
+			    	chaincodeFile = new File(dfif.getRepository().getAbsolutePath() + "/" + filename);
+			        item.write(chaincodeFile);
+			    }
+			}
+			
+			// delegate get contract to interpreter (it will store it on the db after successful install)
+	    	ci.deployContract(channel, chaincodeId, chaincodeVersion, chaincodeFile, chaincodeSpecs);
+	    	
+		} catch (FileUploadException e) {
+	    	rsp.status(500);
+	    	rsp.type("text/html");
+    		return body().with(
+    			h3("Couldn't obtain contract file!")
+    		).render();
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
     	
-    	// TODO
-    	String key = "xcc";// REMOVE
     	
-    	return key;
+    	return chaincodeId;
 	}
 	
 	private static boolean shouldReturnHtml(Request request) {

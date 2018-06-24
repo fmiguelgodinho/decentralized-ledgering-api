@@ -1,6 +1,11 @@
 package core;
 
+import java.io.File;
+import java.io.IOException;
+
 import org.apache.commons.configuration2.Configuration;
+import org.hyperledger.fabric.sdk.exception.InvalidArgumentException;
+import org.hyperledger.fabric.sdk.exception.ProposalException;
 
 import com.mongodb.BasicDBObject;
 import com.mongodb.DB;
@@ -27,7 +32,7 @@ public class ContractInterpreter {
 		this.dpt = dpt;
 	}
 	
-	public void saveRawContract(String channel, String cid, String rawContract) {
+	public void saveRawContractToDB(String channel, String cid, String rawContract) {
 		
 		// build obj being saved
 		final DBObject contractObj = new BasicDBObject()
@@ -58,7 +63,7 @@ public class ContractInterpreter {
 		
 		// save contract to db for future times
 		if (rawContract != null)
-			saveRawContract(channel, cid, rawContract);
+			saveRawContractToDB(channel, cid, rawContract);
 		return rawContract;
 	}
 	
@@ -98,6 +103,23 @@ public class ContractInterpreter {
 		}
     	
 		return rawJsonContract;
+	}
+	
+	public boolean deployContract(String channel, String cid, String cver, File cfile, String cspecs) {
+		
+		// set the correct channel
+		dpt.changeChannel(channel);
+		
+		// install chaincode
+		try {
+			dpt.install(cid, cver, cfile);
+		} catch (InvalidArgumentException | ProposalException | IOException e) {
+			e.printStackTrace();
+		}
+		
+		// TODO: save to db after successful installation and instantiation
+		
+		return true;
 	}
 
 }

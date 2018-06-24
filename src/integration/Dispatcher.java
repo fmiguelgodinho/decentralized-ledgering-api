@@ -17,7 +17,6 @@ import java.util.concurrent.TimeoutException;
 
 import org.apache.commons.configuration2.Configuration;
 import org.apache.log4j.Logger;
-import org.hyperledger.fabric.sdk.BlockEvent.TransactionEvent;
 import org.hyperledger.fabric.sdk.ChaincodeID;
 import org.hyperledger.fabric.sdk.Channel;
 import org.hyperledger.fabric.sdk.EventHub;
@@ -34,14 +33,15 @@ import org.hyperledger.fabric.sdk.exception.ProposalException;
 import org.hyperledger.fabric.sdk.exception.TransactionException;
 import org.hyperledger.fabric.sdk.security.CryptoSuite;
 
-import util.Pair;
-import util.Util;
 import util.NodeConnection;
+import util.Pair;
 
 public class Dispatcher {
 	
 	public static final int CHAINCODE_QUERY_OPERATION = 0;
 	public static final int CHAINCODE_INVOKE_OPERATION = 1;
+//	public static final int CHAINCODE_INSTALL_OPERATION = 2;
+//	public static final int CHAINCODE_INSTANTIATE_OPERATION = 2;
 	
 	
     private static final Logger log = Logger.getLogger(Dispatcher.class);
@@ -138,7 +138,7 @@ public class Dispatcher {
     }
     
     // has to be admin
-    private void install(String chaincodeId, String chaincodeVersion, File chaincodeFile, String chaincodePathPrefix) throws InvalidArgumentException, IOException, ProposalException {
+    public void install(String chaincodeId, String chaincodeVersion, File chaincodeFile) throws InvalidArgumentException, IOException, ProposalException {
     	
     	Collection<ProposalResponse> successful = new LinkedList<ProposalResponse>();
     	Collection<ProposalResponse> failed = new LinkedList<ProposalResponse>();
@@ -155,12 +155,11 @@ public class Dispatcher {
         ipr.setChaincodeVersion(chaincodeVersion);
         
         // set chaincode input stream
-        ipr.setChaincodeInputStream(
-        	Util.generateTarGzInputStream(
-        			chaincodeFile, 
-        			chaincodePathPrefix
-        	)
-        );
+        ipr.setChaincodeSourceLocation(chaincodeFile);
+        
+//        TODO path on docker, and policy based on interpretation
+//        ipr.setChaincodePath(chaincodePath);
+//        ipr.setChaincodeEndorsementPolicy(policy);
         
         // TODO: MAYBE SEND ONLY TO PEERS WHO IS ADMIN FOR
         Collection<ProposalResponse> res = client.sendInstallProposal(ipr, channel.getPeers());
@@ -273,7 +272,8 @@ public class Dispatcher {
         log.info("Collecting endorsements and sending transaction...");
 
         // send transaction with endorsements
-        TransactionEvent te = channel.sendTransaction(responses).get(cfg.getLong("hlf.transaction.timeout"), TimeUnit.MILLISECONDS);
+//        TransactionEvent te = 
+        channel.sendTransaction(responses).get(cfg.getLong("hlf.transaction.timeout"), TimeUnit.MILLISECONDS);
         log.info("Transaction sent.");
     }
     
