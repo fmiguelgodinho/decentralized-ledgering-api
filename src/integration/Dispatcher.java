@@ -17,6 +17,7 @@ import java.util.concurrent.TimeoutException;
 
 import org.apache.commons.configuration2.Configuration;
 import org.apache.log4j.Logger;
+import org.hyperledger.fabric.sdk.BlockEvent.TransactionEvent;
 import org.hyperledger.fabric.sdk.ChaincodeID;
 import org.hyperledger.fabric.sdk.Channel;
 import org.hyperledger.fabric.sdk.EventHub;
@@ -203,6 +204,7 @@ public class Dispatcher {
         // CC function to be called
         qpr.setFcn(chaincodeFn);
         qpr.setArgs(chaincodeArgs);
+        qpr.setProposalWaitTime(cfg.getLong("hlf.proposal.timeout"));
         Collection<ProposalResponse> responses = channel.queryByChaincode(qpr, channel.getPeers());
 
         log.info("Sending query request, function '" + chaincodeFn + "' with arguments ['" + String.join("', '", chaincodeArgs) + "'], through chaincode '" + chaincodeId + "'...");
@@ -271,7 +273,7 @@ public class Dispatcher {
         log.info("Collecting endorsements and sending transaction...");
 
         // send transaction with endorsements
-        channel.sendTransaction(responses).get(cfg.getLong("hlf.transaction.timeout"), TimeUnit.MILLISECONDS);
+        TransactionEvent te = channel.sendTransaction(responses).get(cfg.getLong("hlf.transaction.timeout"), TimeUnit.MILLISECONDS);
         log.info("Transaction sent.");
     }
     
