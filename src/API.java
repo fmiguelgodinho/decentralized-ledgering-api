@@ -46,6 +46,7 @@ import integration.Dispatcher;
 import spark.Request;
 import spark.Response;
 import util.NodeConnection;
+import util.Pair;
 
 public class API {
 	
@@ -154,8 +155,27 @@ public class API {
             	// functions for deploying contracts (should only be available to providers)
                 get("/deploy", (req, rsp) -> getDeployContract(req, rsp));
                 post("/deploy", (req, rsp) -> {
-                	String newKey = postDeployContract(req, rsp);
-                	rsp.redirect("contract/" + newKey);
+                	Pair<String,Exception> result = postDeployContract(req, rsp);
+                	
+                	Exception ex = result.getRight();
+                	
+                	if (ex != null) {
+                		if (ex instanceof FileUploadException) {
+                	    	rsp.status(500);
+                	    	rsp.type("text/html");
+                    		return body().with(
+                    			h3("Couldn't obtain contract file!")
+                    		).render();
+                		} else if (ex instanceof InvalidFileNameException) {
+	            	    	rsp.status(400);
+	            	    	rsp.type("text/html");
+	                		return body().with(
+	                			h3(ex.getMessage())
+	                		).render();
+                		}
+                	}
+                	
+                	rsp.redirect("contract/" + result.getLeft());
                 	return null;
                 });
                 
@@ -173,8 +193,14 @@ public class API {
 	                // invoke contract operation
 	                get("/:cid/invoke", (req, rsp) -> getInvokeOperation(req, rsp));
 	                post("/:cid/invoke", (req, rsp) -> {
-	                	String newKey = postInvokeOperation(req, rsp);
-	                	rsp.redirect("records/" + newKey);
+	                	
+	                	Pair<String,Exception> result = postInvokeOperation(req, rsp);
+	                	
+	                	Exception ex = result.getRight();
+	                	
+	                	// TODO
+	                	
+	                	rsp.redirect("records/" + result.getLeft());
 	                	return null;
 	                });
                 });
@@ -326,7 +352,7 @@ public class API {
 		).render();
 	}
 	
-	private static String postInvokeOperation(Request req, Response rsp) {
+	private static Pair<String,Exception> postInvokeOperation(Request req, Response rsp) {
 
 		String channel = req.params(":channel");
     	String cid = req.params(":cid");
@@ -336,7 +362,7 @@ public class API {
     	// TODO
     	String key = "3";// REMOVE
     	
-    	return key;
+    	return new Pair<String,Exception>(key, null);
 	}
 	
 	
@@ -410,8 +436,10 @@ public class API {
 		).render();
 	}
 	
-	private static String postDeployContract(Request req, Response rsp) {
+	private static Pair<String, Exception> postDeployContract(Request req, Response rsp) {
 
+		Exception exc = null;
+		
 		// this request includes a file
 		req.attribute("org.eclipse.jetty.multipartConfig", new MultipartConfigElement("/tmp"));
 		
@@ -424,10 +452,7 @@ public class API {
 		upload.setSizeMax(cfg.getLong("api.fileupload.maxSize"));
 
 		// parse the request
-		try {
-			
-
-			
+		try {			
 			List<FileItem> items = upload.parseRequest(req.raw());
 			
 			// Process the uploaded items
@@ -463,23 +488,14 @@ public class API {
 	    	ci.deployContract(channel, chaincodeId, chaincodeVersion, chaincodeFile, chaincodeSpecs);
 	    	
 		} catch (FileUploadException e) {
-	    	rsp.status(500);
-	    	rsp.type("text/html");
-    		return body().with(
-    			h3("Couldn't obtain contract file!")
-    		).render();
+    		exc = e;
 		} catch (InvalidFileNameException f) {
-	    	rsp.status(400);
-	    	rsp.type("text/html");
-    		return body().with(
-    			h3(f.getMessage())
-    		).render();
+    		exc = f;
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
-    	
-    	
-    	return chaincodeId;
+		
+    	return new Pair<String, Exception>(chaincodeId, exc);
 	}
 	
 	private static boolean shouldReturnHtml(Request request) {
