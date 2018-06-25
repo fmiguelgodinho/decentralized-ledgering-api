@@ -185,11 +185,26 @@ public class API {
 	                // get contract specification
 	                get("/:cid", (req, rsp) -> getContract(req, rsp));
 	                
-	                // get records stored in contract
-	                get("/:cid/records", (req, rsp) -> getRecordsList(req, rsp));
-	                
-	                // get specific record
-	                get("/:cid/records/:key", (req, rsp) -> getRecordDetails(req, rsp));
+	                // query contract
+	                get("/:cid/query", (req, rsp) -> getQueryOperation(req, rsp));
+	                post("/:cid/query", (req, rsp) -> {
+	                	
+	                	Pair<String,Exception> result = postQueryOperation(req, rsp);
+	                	
+	                	Exception ex = result.getRight();
+	                	
+	                	if (ex != null) {
+                	    	rsp.status(500);
+                	    	rsp.type("text/html");
+                    		return body().with(
+                    			h3("Couldn't execute query!")
+                    		).render();
+	                	}
+
+	                	rsp.status(200);
+	                	rsp.type("text/html");
+	                	return body().with(div(result.getLeft()));
+	                });
 	                
 	                // invoke contract operation
 	                get("/:cid/invoke", (req, rsp) -> getInvokeOperation(req, rsp));
@@ -199,10 +214,17 @@ public class API {
 	                	
 	                	Exception ex = result.getRight();
 	                	
-	                	// TODO
-	                	
-	                	rsp.redirect("records/" + result.getLeft());
-	                	return null;
+	                	if (ex != null) {
+                	    	rsp.status(500);
+                	    	rsp.type("text/html");
+                    		return body().with(
+                    			h3("Couldn't execute invocation!")
+                    		).render();
+	                	}
+
+	                	rsp.status(200);
+	                	rsp.type("text/html");
+	                	return body().with(div(result.getLeft()));
 	                });
                 });
             });
@@ -254,27 +276,81 @@ public class API {
 		).render();
 	}
 	
-	private static String getRecordsList(Request req, Response rsp) {
-
+//	private static String getRecordsList(Request req, Response rsp) {
+//
+//		String channel = req.params(":channel");
+//    	String cid = req.params(":cid");
+//		// execute action
+//    	
+//    	String result = null;
+//    	//TODO maybe? use the contract interpreter for this
+//    	// dynamically using logic of contract
+//    	try {
+//    		dpt.changeChannel(channel);
+//			result = dpt.callChaincodeFunction(
+//					Dispatcher.CHAINCODE_QUERY_OPERATION, 
+//					cid, 
+//					"queryAll", 
+//					new String[] {}
+//			);
+//		} catch (InterruptedException e) {
+//			e.printStackTrace();
+//		}
+//    	
+//		
+//		// return html
+//    	rsp.status(200);
+//    	rsp.type("text/html");
+//		return body().with(
+//		    h3("Contract ID: " + cid),
+//		    div().with(
+//		    	p("Below is a list of records related with the contract:")
+//		    ),
+//		    div(result)
+//		).render();
+//	}
+//	
+//	private static String getRecordDetails(Request req, Response rsp) {
+//		
+//		String channel = req.params(":channel");
+//    	String cid = req.params(":cid");
+//    	String key = req.params(":key");
+//		// execute action
+//    	
+//    	String result = null;
+//    	//TODO maybe? use the contract interpreter for this
+//    	// dynamically using logic of contract
+//    	try {
+//    		dpt.changeChannel(channel);
+//			result = dpt.callChaincodeFunction(
+//					Dispatcher.CHAINCODE_QUERY_OPERATION, 
+//					cid, 
+//					"query", 
+//					new String[] {
+//							key, "true" // view history
+//					}
+//			);
+//		} catch (InterruptedException e) {
+//			e.printStackTrace();
+//		}
+//		
+//		// return html
+//    	rsp.status(200);
+//    	rsp.type("text/html");
+//		return body().with(
+//		    h3("Record Key: " + key),
+//		    div().with(
+//		    	p("Below is all data related with the specified record:")
+//		    )
+//		).render();
+//	}
+	
+	private static String getQueryOperation(Request req, Response rsp) {
+		
 		String channel = req.params(":channel");
-    	String cid = req.params(":cid");
+		String cid = req.params(":cid");
 		// execute action
-    	
-    	String result = null;
-    	//TODO maybe? use the contract interpreter for this
-    	// dynamically using logic of contract
-    	try {
-    		dpt.changeChannel(channel);
-			result = dpt.callChaincodeFunction(
-					Dispatcher.CHAINCODE_QUERY_OPERATION, 
-					cid, 
-					"queryAll", 
-					new String[] {}
-			);
-		} catch (InterruptedException e) {
-			e.printStackTrace();
-		}
-    	
+		// TODO
 		
 		// return html
     	rsp.status(200);
@@ -282,43 +358,38 @@ public class API {
 		return body().with(
 		    h3("Contract ID: " + cid),
 		    div().with(
-		    	p("Below is a list of records related with the contract:")
-		    ),
-		    div(result)
-		).render();
-	}
-	
-	private static String getRecordDetails(Request req, Response rsp) {
-		
-		String channel = req.params(":channel");
-    	String cid = req.params(":cid");
-    	String key = req.params(":key");
-		// execute action
-    	
-    	String result = null;
-    	//TODO maybe? use the contract interpreter for this
-    	// dynamically using logic of contract
-    	try {
-    		dpt.changeChannel(channel);
-			result = dpt.callChaincodeFunction(
-					Dispatcher.CHAINCODE_QUERY_OPERATION, 
-					cid, 
-					"query", 
-					new String[] {
-							key, "true" // view history
-					}
-			);
-		} catch (InterruptedException e) {
-			e.printStackTrace();
-		}
-		
-		// return html
-    	rsp.status(200);
-    	rsp.type("text/html");
-		return body().with(
-		    h3("Record Key: " + key),
-		    div().with(
-		    	p("Below is all data related with the specified record:")
+		    	p("Fill in querying details. View contract details if you need to know what functions are supported:"),
+		    	br(),
+		    	form()
+		    	.withMethod("POST")
+		    	.withAction("query")
+		    	.withId("queryOperationForm")
+		    	.with(
+				    	// operation id
+				    	span("Function to query: "),
+				    	input()
+				    	.withType("text")
+				    	.withId("operationId")
+				    	.withName("operationId")
+				    	.withPlaceholder("e.g. GetCarByLicensePlate")
+				    	.isRequired(),
+				    	br(),
+				    	
+				    	// transaction / data details
+				    	div("Arguments to be fed to the function (separate arguments by a '|'): "),
+				    	textarea()
+				    	.attr("form", "queryOperationForm")
+				    	.attr("rows", 20)
+				    	.attr("cols", 70)
+				    	.withId("operationArgs")
+				    	.withName("operationArgs")
+				    	.withPlaceholder("e.g. \n\n64-44-KL"),
+				    	
+				    	// submit
+				    	br(),
+				    	button("Query")
+				    	.withType("submit")
+		    	)
 		    )
 		).render();
 	}
@@ -336,7 +407,7 @@ public class API {
 		return body().with(
 		    h3("Contract ID: " + cid),
 		    div().with(
-		    	p("Fill in invocation details. View contract details if you need to know what operations are supported:"),
+		    	p("Fill in invocation details. View contract details if you need to know what functions are supported:"),
 		    	br(),
 		    	form()
 		    	.withMethod("POST")
@@ -344,7 +415,7 @@ public class API {
 		    	.withId("invokeOperationForm")
 		    	.with(
 				    	// operation id
-				    	span("Operation to execute: "),
+				    	span("Function to invoke: "),
 				    	input()
 				    	.withType("text")
 				    	.withId("operationId")
@@ -354,7 +425,7 @@ public class API {
 				    	br(),
 				    	
 				    	// transaction / data details
-				    	div("Arguments to be fed to the operation (separate arguments by a '|'): "),
+				    	div("Arguments to be fed to the function (separate arguments by a '|'): "),
 				    	textarea()
 				    	.attr("form", "invokeOperationForm")
 				    	.attr("rows", 20)
@@ -364,8 +435,7 @@ public class API {
 				    	.withPlaceholder("e.g. \n\n39128340614;\nexample-string;\n{\n\tbrand: 'Fiat',\n\tmodel: '500', \n\tunits: 1"
 				    			+ "\n\tcar-id: ['u8d923-da8313-28mc3-km093i'], \n\tpayment-details: {\n\t\tamount-to-be-payed: '30000',"
 				    			+ "\n\t\tcurrency: 'euro', \n\t\tamount-paying: '30000', \n\t\tpayment-method: 'credit-card',"
-				    			+ "\n\t\tpayment-policy: '100%'\n\t}\n}")
-				    	.isRequired(),
+				    			+ "\n\t\tpayment-policy: '100%'\n\t}\n}"),
 				    	
 				    	// submit
 				    	br(),
@@ -376,8 +446,18 @@ public class API {
 		).render();
 	}
 	
+	private static Pair<String,Exception> postQueryOperation(Request req, Response rsp) {
+    	return postOperation(req, rsp, Dispatcher.CHAINCODE_QUERY_OPERATION);
+	}
+	
+	
 	private static Pair<String,Exception> postInvokeOperation(Request req, Response rsp) {
-
+    	return postOperation(req, rsp, Dispatcher.CHAINCODE_INVOKE_OPERATION);
+	}
+	
+	// TODO merge this and postQueryOperation into a single one
+	private static Pair<String,Exception> postOperation(Request req, Response rsp, int type) {
+		
 		Exception exc = null;
 		
 		String channel = req.params(":channel");
@@ -401,7 +481,7 @@ public class API {
 		
     		dpt.changeChannel(channel);
 			result = dpt.callChaincodeFunction(
-					Dispatcher.CHAINCODE_INVOKE_OPERATION, 
+					type, 
 					cid, 
 					oid, 
 					args
@@ -411,12 +491,8 @@ public class API {
 		} catch (InterruptedException e) {
 			e.printStackTrace();
 		} 
-
     	
-    	// TODO
-    	String key = "3";// REMOVE
-    	
-    	return new Pair<String,Exception>(key, exc);
+    	return new Pair<String,Exception>(result, exc);
 	}
 	
 	
