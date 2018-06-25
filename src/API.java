@@ -34,6 +34,7 @@ import org.apache.commons.fileupload.disk.DiskFileItemFactory;
 import org.apache.commons.fileupload.servlet.ServletFileUpload;
 import org.apache.commons.io.FilenameUtils;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
+import org.hyperledger.fabric_ca.sdk.exception.InvalidArgumentException;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -258,7 +259,22 @@ public class API {
 		String channel = req.params(":channel");
     	String cid = req.params(":cid");
 		// execute action
-    	//TODO
+    	
+    	String result = null;
+    	//TODO maybe? use the contract interpreter for this
+    	// dynamically using logic of contract
+    	try {
+    		dpt.changeChannel(channel);
+			result = dpt.callChaincodeFunction(
+					Dispatcher.CHAINCODE_QUERY_OPERATION, 
+					cid, 
+					"queryAll", 
+					new String[] {}
+			);
+		} catch (InterruptedException e) {
+			e.printStackTrace();
+		}
+    	
 		
 		// return html
     	rsp.status(200);
@@ -267,18 +283,8 @@ public class API {
 		    h3("Contract ID: " + cid),
 		    div().with(
 		    	p("Below is a list of records related with the contract:")
-
-//		          model.getAllPosts().stream().map((post) ->
-//		                div().with(
-//		                        h2(post.getTitle()),
-//		                        p(post.getContent()),
-//		                        ul().with(post.getCategories().stream().map((category) ->
-//		                              li(category)).collect(Collectors.toList())
-//		                        )
-//		                )
-//		          ).collect(Collectors.toList())
-//	    )
-		    )
+		    ),
+		    div(result)
 		).render();
 	}
 	
@@ -288,7 +294,23 @@ public class API {
     	String cid = req.params(":cid");
     	String key = req.params(":key");
 		// execute action
-    	//TODO
+    	
+    	String result = null;
+    	//TODO maybe? use the contract interpreter for this
+    	// dynamically using logic of contract
+    	try {
+    		dpt.changeChannel(channel);
+			result = dpt.callChaincodeFunction(
+					Dispatcher.CHAINCODE_QUERY_OPERATION, 
+					cid, 
+					"query", 
+					new String[] {
+							key, "true" // view history
+					}
+			);
+		} catch (InterruptedException e) {
+			e.printStackTrace();
+		}
 		
 		// return html
     	rsp.status(200);
@@ -319,6 +341,7 @@ public class API {
 		    	form()
 		    	.withMethod("POST")
 		    	.withAction("invoke")
+		    	.withId("invokeOperationForm")
 		    	.with(
 				    	// operation id
 				    	span("Operation to execute: "),
@@ -331,13 +354,14 @@ public class API {
 				    	br(),
 				    	
 				    	// transaction / data details
-				    	div("Transactional data to be used by the operation (JSON format): "),
+				    	div("Arguments to be fed to the operation (separate arguments by a '|'): "),
 				    	textarea()
+				    	.attr("form", "invokeOperationForm")
 				    	.attr("rows", 20)
 				    	.attr("cols", 70)
-				    	.withId("transactionData")
-				    	.withName("transactionData")
-				    	.withPlaceholder("e.g. \n\n{\n\tbrand: 'Fiat',\n\tmodel: '500', \n\tunits: 1"
+				    	.withId("operationArgs")
+				    	.withName("operationArgs")
+				    	.withPlaceholder("e.g. \n\n39128340614;\nexample-string;\n{\n\tbrand: 'Fiat',\n\tmodel: '500', \n\tunits: 1"
 				    			+ "\n\tcar-id: ['u8d923-da8313-28mc3-km093i'], \n\tpayment-details: {\n\t\tamount-to-be-payed: '30000',"
 				    			+ "\n\t\tcurrency: 'euro', \n\t\tamount-paying: '30000', \n\t\tpayment-method: 'credit-card',"
 				    			+ "\n\t\tpayment-policy: '100%'\n\t}\n}")
@@ -354,15 +378,45 @@ public class API {
 	
 	private static Pair<String,Exception> postInvokeOperation(Request req, Response rsp) {
 
+		Exception exc = null;
+		
 		String channel = req.params(":channel");
     	String cid = req.params(":cid");
     	String oid = req.queryParams("operationId");
-    	String tx = req.queryParams("transactionData");
+    	String oargs = req.queryParams("operationArgs");
+    	
+    	String result = null;
+    	//TODO maybe? use the contract interpreter for this
+    	// dynamically using logic of contract
+    	// 280f06d6-2c1d-48fc-a5ba-3bfacc42ba08 | { "foo": 123, "bar": "abc" }
+    	
+    	String[] args = oargs.split("\\|");
+    	for (int i = 0; i < args.length; i++) {
+    		args[i] = args[i].trim();
+    	}
+    	
+		try {
+	    	if (args.length == 0)
+	    		throw new InvalidArgumentException("No arguments were able to be parsed! Please validate your input!");
+		
+    		dpt.changeChannel(channel);
+			result = dpt.callChaincodeFunction(
+					Dispatcher.CHAINCODE_INVOKE_OPERATION, 
+					cid, 
+					oid, 
+					args
+			);
+		} catch (InvalidArgumentException i) {
+			exc = i;
+		} catch (InterruptedException e) {
+			e.printStackTrace();
+		} 
+
     	
     	// TODO
     	String key = "3";// REMOVE
     	
-    	return new Pair<String,Exception>(key, null);
+    	return new Pair<String,Exception>(key, exc);
 	}
 	
 	
@@ -411,7 +465,6 @@ public class API {
 				    	textarea()
 				    	.attr("rows", 20)
 				    	.attr("cols", 70)
-
 				    	.attr("form", "deployContractForm")
 				    	.withId("contractSpecs")
 				    	.withName("contractSpecs")

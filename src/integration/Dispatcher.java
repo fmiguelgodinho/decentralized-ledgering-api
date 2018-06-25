@@ -248,7 +248,7 @@ public class Dispatcher {
         TransactionProposalRequest tpr = client.newTransactionProposalRequest();
         
         // build cc id providing the chaincode name. Version is omitted here.
-        ChaincodeID CCId = ChaincodeID.newBuilder().setName(chaincodeFn).build();
+        ChaincodeID CCId = ChaincodeID.newBuilder().setName(chaincodeId).build();
 
         // CC function to be called
         tpr.setChaincodeID(CCId);
@@ -256,7 +256,7 @@ public class Dispatcher {
         tpr.setArgs(chaincodeArgs);
         tpr.setProposalWaitTime(cfg.getLong("hlf.proposal.timeout"));
         
-        Collection<ProposalResponse> responses = channel.sendTransactionProposal(tpr);
+        Collection<ProposalResponse> responses = channel.sendTransactionProposal(tpr, channel.getPeers());
         
         log.info("Sending transaction proposal, function '" + chaincodeFn + "' with arguments ['" + String.join("', '", chaincodeArgs) + "'], through chaincode '" + chaincodeId + "'...");
         
