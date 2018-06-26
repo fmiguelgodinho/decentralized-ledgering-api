@@ -18,15 +18,13 @@ import core.dto.Contract;
 import integration.Dispatcher;
 
 public class ContractInterpreter {
+		
 	
-//	private Map<String, Contract> contracts;	// list of contracts loaded in memory (CID -> contract)
-												// if a contract isn't here, this interpreter will fetch it from the BC
-	
+	// TODO: update contracts in db if updated in bc?
 	private DBCollection contractCollection;
 	private Dispatcher dpt;
 	
 	public ContractInterpreter(Configuration cfg, MongoClient dbClient, Dispatcher dpt) {
-//		contracts = new HashMap<String, Contract>();
 		DB db = dbClient.getDB(cfg.getString("mongo.database"));
 		contractCollection = db.getCollection(cfg.getString("mongo.contractCollection"));
 		this.dpt = dpt;
@@ -92,7 +90,7 @@ public class ContractInterpreter {
     	// query the chaincode
     	String rawJsonContract = null;
     	try {
-    		rawJsonContract = dpt.callChaincodeFunction(
+    		rawJsonContract = (String) dpt.callChaincodeFunction(
 				Dispatcher.CHAINCODE_QUERY_OPERATION, 
 				cid, 
 				"getContractDefinition", 

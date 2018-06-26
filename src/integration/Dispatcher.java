@@ -11,12 +11,14 @@ import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import org.apache.commons.configuration2.Configuration;
 import org.apache.log4j.Logger;
+import org.hyperledger.fabric.sdk.BlockEvent.TransactionEvent;
 import org.hyperledger.fabric.sdk.ChaincodeID;
 import org.hyperledger.fabric.sdk.Channel;
 import org.hyperledger.fabric.sdk.EventHub;
@@ -96,6 +98,7 @@ public class Dispatcher {
     			rsp = query(chaincodeId, chaincodeFn, chaincodeArgs);
     		} else if (op == CHAINCODE_INVOKE_OPERATION) {
     			invoke(chaincodeId, chaincodeFn, chaincodeArgs);
+    			// te.get(cfg.getLong("hlf.transaction.timeout"), TimeUnit.MILLISECONDS);
     		} else {
     			throw new IllegalArgumentException("Unrecognized operation: " + op);
     		}
@@ -103,7 +106,7 @@ public class Dispatcher {
 		} catch (ProposalException | InvalidArgumentException | ExecutionException | TimeoutException e) {
 			e.printStackTrace();
 		} finally {
-			Thread.sleep(cfg.getLong("hlf.chaincode.callInterval"));
+//			Thread.sleep(cfg.getLong("hlf.chaincode.callInterval"));
 		}
     	
     	return rsp;
@@ -235,7 +238,8 @@ public class Dispatcher {
 
     }
     
-    private void invoke(String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws ProposalException, InvalidArgumentException, InterruptedException, ExecutionException, TimeoutException {
+    // CompletableFuture<TransactionEvent>
+    private TransactionEvent invoke(String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws ProposalException, InvalidArgumentException, InterruptedException, ExecutionException, TimeoutException {
     	
 
     	Collection<ProposalResponse> successful = new LinkedList<ProposalResponse>();
@@ -271,10 +275,10 @@ public class Dispatcher {
         }
         log.info("Collecting endorsements and sending transaction...");
 
-        // send transaction with endorsements
-//        TransactionEvent te = 
-        channel.sendTransaction(responses).get(cfg.getLong("hlf.transaction.timeout"), TimeUnit.MILLISECONDS);
+
         log.info("Transaction sent.");
+        // send transaction with endorsements
+        return channel.sendTransaction(responses).get();
     }
     
     private Channel initChannel(String channelName, NodeConnection[] nodesOnChannel) throws InvalidArgumentException, TransactionException {
