@@ -6,12 +6,13 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedList;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -35,10 +36,14 @@ import org.hyperledger.fabric.sdk.exception.ProposalException;
 import org.hyperledger.fabric.sdk.exception.TransactionException;
 import org.hyperledger.fabric.sdk.security.CryptoSuite;
 
+import com.google.protobuf.ByteString;
+
+import core.dto.ChaincodeResult;
 import util.NodeConnection;
 import util.Pair;
 
 public class Dispatcher {
+	
 	
 	public static final int CHAINCODE_QUERY_OPERATION = 0;
 	public static final int CHAINCODE_INVOKE_OPERATION = 1;
@@ -88,20 +93,26 @@ public class Dispatcher {
     }
     
     // use HLFJavaClient.CHAINCODE_QUERY_OPERATION or HLFJavaClient.CHAINCODE_INVOKE_OPERATION
-    public String callChaincodeFunction(int op, String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws InterruptedException {
+    public ChaincodeResult callChaincodeFunction(int op, String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws InterruptedException {
     	
-    	String rsp = null;
+    	ChaincodeResult cr = new ChaincodeResult(ChaincodeResult.CHAINCODE_FAILURE);
     	
     	try {
     		// call corresponding chaincode operation
-    		if (op == CHAINCODE_QUERY_OPERATION) {
-    			rsp = query(chaincodeId, chaincodeFn, chaincodeArgs);
-    		} else if (op == CHAINCODE_INVOKE_OPERATION) {
-    			invoke(chaincodeId, chaincodeFn, chaincodeArgs);
-    			// te.get(cfg.getLong("hlf.transaction.timeout"), TimeUnit.MILLISECONDS);
-    		} else {
-    			throw new IllegalArgumentException("Unrecognized operation: " + op);
+    		switch (op) {
+    		
+	    		case CHAINCODE_QUERY_OPERATION:
+	    			cr = query(chaincodeId, chaincodeFn, chaincodeArgs);
+	    			break;
+	    			
+	    		case CHAINCODE_INVOKE_OPERATION:
+	    			cr = invoke(chaincodeId, chaincodeFn, chaincodeArgs);
+	    			break;
+	    			
+				default:
+	    			throw new IllegalArgumentException("Unrecognized operation: " + op);
     		}
+
 			
 		} catch (ProposalException | InvalidArgumentException | ExecutionException | TimeoutException e) {
 			e.printStackTrace();
@@ -109,7 +120,7 @@ public class Dispatcher {
 //			Thread.sleep(cfg.getLong("hlf.chaincode.callInterval"));
 		}
     	
-    	return rsp;
+    	return cr;
     }
     
     public void changeChannel(String channelName) throws IllegalArgumentException {
@@ -187,7 +198,7 @@ public class Dispatcher {
         
     }
 
-    private String query(String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws ProposalException, InvalidArgumentException {
+    private ChaincodeResult query(String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws ProposalException, InvalidArgumentException {
     	
 
     	Collection<ProposalResponse> successful = new LinkedList<ProposalResponse>();
@@ -233,13 +244,10 @@ public class Dispatcher {
         	throw new RuntimeException("Too many peers failed the response!");
         }
         
-        
-        return responseString;
-
+        return new ChaincodeResult(ChaincodeResult.CHAINCODE_SUCCESS, responseString);
     }
     
-    // CompletableFuture<TransactionEvent>
-    private TransactionEvent invoke(String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws ProposalException, InvalidArgumentException, InterruptedException, ExecutionException, TimeoutException {
+    private ChaincodeResult invoke(String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws ProposalException, InvalidArgumentException, InterruptedException, ExecutionException, TimeoutException {
     	
 
     	Collection<ProposalResponse> successful = new LinkedList<ProposalResponse>();
@@ -265,10 +273,13 @@ public class Dispatcher {
         log.info("Sending transaction proposal, function '" + chaincodeFn + "' with arguments ['" + String.join("', '", chaincodeArgs) + "'], through chaincode '" + chaincodeId + "'...");
         
         // parse response
+        List<ByteString> signatures = new ArrayList<ByteString>();
         for (ProposalResponse rsp : responses) {
         	// if valid
         	if (rsp.isVerified() && rsp.getStatus() == ProposalResponse.Status.SUCCESS) {
         		successful.add(rsp);
+        		signatures.add(rsp.getProposalResponse().getEndorsement().getSignature());
+        		// TODO, do something if it's a thresh signature, as it's just a single one
         	} else {
         		failed.add(rsp);
         	}
@@ -276,9 +287,15 @@ public class Dispatcher {
         log.info("Collecting endorsements and sending transaction...");
 
 
-        log.info("Transaction sent.");
         // send transaction with endorsements
-        return channel.sendTransaction(responses).get();
+        TransactionEvent te = channel.sendTransaction(responses).get(
+			cfg.getLong("hlf.transaction.timeout"), 
+			TimeUnit.MILLISECONDS
+		);
+
+        log.info("Transaction sent.");
+        
+        return new ChaincodeResult(ChaincodeResult.CHAINCODE_SUCCESS, te.getTimestamp(), signatures);
     }
     
     private Channel initChannel(String channelName, NodeConnection[] nodesOnChannel) throws InvalidArgumentException, TransactionException {

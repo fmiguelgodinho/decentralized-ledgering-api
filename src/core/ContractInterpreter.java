@@ -14,6 +14,7 @@ import com.mongodb.DBCursor;
 import com.mongodb.DBObject;
 import com.mongodb.MongoClient;
 
+import core.dto.ChaincodeResult;
 import core.dto.Contract;
 import integration.Dispatcher;
 
@@ -90,12 +91,15 @@ public class ContractInterpreter {
     	// query the chaincode
     	String rawJsonContract = null;
     	try {
-    		rawJsonContract = (String) dpt.callChaincodeFunction(
+    		ChaincodeResult cr = dpt.callChaincodeFunction(
 				Dispatcher.CHAINCODE_QUERY_OPERATION, 
 				cid, 
 				"getContractDefinition", 
 				new String[] {}								// empty args
 			);
+    		if (cr.getStatus() == ChaincodeResult.CHAINCODE_SUCCESS) {
+    			rawJsonContract = cr.getContent();
+    		}
 		} catch (InterruptedException e) {
 			e.printStackTrace();
 		}

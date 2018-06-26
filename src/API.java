@@ -8,6 +8,7 @@ import static j2html.TagCreator.input;
 import static j2html.TagCreator.p;
 import static j2html.TagCreator.span;
 import static j2html.TagCreator.textarea;
+import static j2html.TagCreator.each;
 import static spark.Spark.get;
 import static spark.Spark.path;
 import static spark.Spark.port;
@@ -19,6 +20,8 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.security.Security;
+import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Iterator;
 import java.util.List;
 
@@ -38,11 +41,13 @@ import org.hyperledger.fabric_ca.sdk.exception.InvalidArgumentException;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.protobuf.ByteString;
 import com.mongodb.MongoClient;
 import com.mongodb.MongoClientURI;
 
 import core.ContractInterpreter;
 import core.RBEngine;
+import core.dto.ChaincodeResult;
 import integration.Dispatcher;
 import spark.Request;
 import spark.Response;
@@ -189,42 +194,58 @@ public class API {
 	                get("/:cid/query", (req, rsp) -> getQueryOperation(req, rsp));
 	                post("/:cid/query", (req, rsp) -> {
 	                	
-	                	Pair<String,Exception> result = postQueryOperation(req, rsp);
+	                	ChaincodeResult result = postQueryOperation(req, rsp);
 	                	
-	                	Exception ex = result.getRight();
-	                	
-	                	if (ex != null) {
+	                	if (result.getStatus() == ChaincodeResult.CHAINCODE_FAILURE) {
                 	    	rsp.status(500);
                 	    	rsp.type("text/html");
                     		return body().with(
-                    			h3("Couldn't execute query!")
+                    			h3("Query result: FAIL"),
+                    			div("Couldn't execute query!")
                     		).render();
 	                	}
 
 	                	rsp.status(200);
 	                	rsp.type("text/html");
-	                	return body().with(div(result.getLeft()));
+	                	return body().with(
+	                			h3("Query result: OK"),
+	                			div("Response: " + result.getContent())
+	                	).render();
 	                });
 	                
 	                // invoke contract operation
 	                get("/:cid/invoke", (req, rsp) -> getInvokeOperation(req, rsp));
 	                post("/:cid/invoke", (req, rsp) -> {
 	                	
-	                	Pair<String,Exception> result = postInvokeOperation(req, rsp);
+	                	ChaincodeResult result = postInvokeOperation(req, rsp);
 	                	
-	                	Exception ex = result.getRight();
-	                	
-	                	if (ex != null) {
+	                	if (result.getStatus() == ChaincodeResult.CHAINCODE_FAILURE) {
                 	    	rsp.status(500);
                 	    	rsp.type("text/html");
                     		return body().with(
-                    			h3("Couldn't execute invocation!")
+                				h3("Invocation result: FAIL"),
+                    			div("Couldn't execute invocation!")
                     		).render();
 	                	}
-
+	                	
+	                	List<ByteString> signatures = result.getSignatures();
+	                	List<String> sigResult = new ArrayList<String>();
+	                	for (ByteString sig : signatures) {
+	                		byte[] b64sig = Base64.getEncoder().encode(sig.toByteArray());
+	                		sigResult.add(new String(b64sig));
+	                	}
+	                	
 	                	rsp.status(200);
 	                	rsp.type("text/html");
-	                	return body().with(div(result.getLeft()));
+	                	return body().with(
+	                			h3("Invocation result: OK"),
+	                			div("Timestamp: " + result.getTimestamp().toString()),
+	                			div("Signature(s): "),
+	                			br(),
+	                			each(sigResult, sig -> div(
+                					sig
+	                			).with(br(), br()))
+	                	).render();
 	                });
                 });
             });
@@ -446,17 +467,16 @@ public class API {
 		).render();
 	}
 	
-	private static Pair<String,Exception> postQueryOperation(Request req, Response rsp) {
+	private static ChaincodeResult postQueryOperation(Request req, Response rsp) {
     	return postOperation(req, rsp, Dispatcher.CHAINCODE_QUERY_OPERATION);
 	}
 	
 	
-	private static Pair<String,Exception> postInvokeOperation(Request req, Response rsp) {
+	private static ChaincodeResult postInvokeOperation(Request req, Response rsp) {
     	return postOperation(req, rsp, Dispatcher.CHAINCODE_INVOKE_OPERATION);
 	}
 	
-	// TODO merge this and postQueryOperation into a single one
-	private static Pair<String,Exception> postOperation(Request req, Response rsp, int type) {
+	private static ChaincodeResult postOperation(Request req, Response rsp, int type) {
 		
 		Exception exc = null;
 		
@@ -465,7 +485,7 @@ public class API {
     	String oid = req.queryParams("operationId");
     	String oargs = req.queryParams("operationArgs");
     	
-    	String result = null;
+    	ChaincodeResult result = null;
     	//TODO maybe? use the contract interpreter for this
     	// dynamically using logic of contract
     	// 280f06d6-2c1d-48fc-a5ba-3bfacc42ba08 | { "foo": 123, "bar": "abc" }
@@ -486,13 +506,11 @@ public class API {
 					oid, 
 					args
 			);
-		} catch (InvalidArgumentException i) {
-			exc = i;
-		} catch (InterruptedException e) {
+		} catch (InvalidArgumentException | InterruptedException e) {
 			e.printStackTrace();
 		} 
     	
-    	return new Pair<String,Exception>(result, exc);
+    	return result;
 	}
 	
 	
