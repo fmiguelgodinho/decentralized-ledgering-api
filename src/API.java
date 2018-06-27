@@ -103,7 +103,9 @@ public class API {
 		
 		// create a factory for disk-based uploaded file items
 		dfif = new DiskFileItemFactory();
-		dfif.setRepository(new File(cfg.getString("api.fileupload.repositoryPath")));
+		File repo = new File(cfg.getString("api.fileupload.repositoryPath"));
+		repo.mkdirs();
+		dfif.setRepository(repo);
 	}
 	
 	private static void startInternalModules() throws Exception {
@@ -170,7 +172,7 @@ public class API {
                 	    	rsp.status(500);
                 	    	rsp.type("text/html");
                     		return body().with(
-                    			h3("Couldn't obtain contract file!")
+                    			h3(ex.getMessage())
                     		).render();
                 		} else if (ex instanceof InvalidFileNameException) {
 	            	    	rsp.status(400);
@@ -592,8 +594,8 @@ public class API {
 		
 		String channel = req.params(":channel");
 
-		String chaincodeId = null, chaincodeVersion = null, chaincodeSpecs = null;
-		File chaincodeFile = null;
+		String chaincodeId = null, chaincodeVersion = null, chaincodeSpecs = null, chaincodePath = null;
+		File chaincodeSourceLocation = new File(dfif.getRepository().getAbsolutePath()), chaincodeFile = null;
 		
 		ServletFileUpload upload = new ServletFileUpload(dfif);
 		upload.setSizeMax(cfg.getLong("api.fileupload.maxSize"));
@@ -626,13 +628,20 @@ public class API {
 			    	if (fileext == null || !fileext.equals("go")) {
 			    		throw new InvalidFileNameException("Invalid file extension", "Invalid file extension for a contract! (Submit a .go file)");
 			    	}
-			    	chaincodeFile = new File(dfif.getRepository().getAbsolutePath() + "/" + filename);
+			    	
+			    	chaincodeFile = new File(chaincodeSourceLocation.getAbsolutePath() + "/src/" + FilenameUtils.getBaseName(filename) + "/" + filename);
+			    	
+			    	// create cc folders first
+			    	chaincodeFile.getParentFile().mkdirs();
+			    	// write to file
 			        item.write(chaincodeFile);
 			    }
 			}
 			
+			
+			
 			// delegate get contract to interpreter (it will store it on the db after successful install)
-	    	ci.deployContract(channel, chaincodeId, chaincodeVersion, chaincodeFile, chaincodeSpecs);
+	    	ci.deployContract(channel, chaincodeId, chaincodeVersion, chaincodeSourceLocation, FilenameUtils.getBaseName(chaincodeFile.getParent()), chaincodeSpecs);
 	    	
 		} catch (FileUploadException e) {
     		exc = e;

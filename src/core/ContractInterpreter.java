@@ -107,14 +107,14 @@ public class ContractInterpreter {
 		return rawJsonContract;
 	}
 	
-	public boolean deployContract(String channel, String cid, String cver, File cfile, String cspecs) {
+	public boolean deployContract(String channel, String cid, String cver, File csfolder, String cpath, String cspecs) {
 		
 		// set the correct channel
 		dpt.changeChannel(channel);
 		
 		// install chaincode
 		try {
-			dpt.install(cid, cver, cfile);
+			dpt.install(cid, cver, csfolder, cpath);
 		} catch (InvalidArgumentException | ProposalException | IOException e) {
 			e.printStackTrace();
 		}
