@@ -22,20 +22,11 @@ import java.io.IOException;
 import java.security.Security;
 import java.util.ArrayList;
 import java.util.Base64;
-import java.util.Iterator;
 import java.util.List;
-
-import javax.servlet.MultipartConfigElement;
 
 import org.apache.commons.configuration2.Configuration;
 import org.apache.commons.configuration2.builder.fluent.Configurations;
 import org.apache.commons.configuration2.ex.ConfigurationException;
-import org.apache.commons.fileupload.FileItem;
-import org.apache.commons.fileupload.FileUploadException;
-import org.apache.commons.fileupload.InvalidFileNameException;
-import org.apache.commons.fileupload.disk.DiskFileItemFactory;
-import org.apache.commons.fileupload.servlet.ServletFileUpload;
-import org.apache.commons.io.FilenameUtils;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.hyperledger.fabric_ca.sdk.exception.InvalidArgumentException;
 
@@ -46,14 +37,11 @@ import com.mongodb.MongoClient;
 import com.mongodb.MongoClientURI;
 
 import core.ContractInterpreter;
-import core.RBEngine;
 import core.dto.ChaincodeResult;
-import core.exception.InvalidContractException;
 import integration.Dispatcher;
 import spark.Request;
 import spark.Response;
 import util.NodeConnection;
-import util.Pair;
 
 public class API {
 	
@@ -74,8 +62,7 @@ public class API {
 	private static Configuration cfg;
 	private static Dispatcher dpt;
 	private static ContractInterpreter ci;
-	private static RBEngine rbe;
-	private static DiskFileItemFactory dfif;
+//	private static DiskFileItemFactory dfif;
 	
 	public static void main(String[] args) throws Exception {
 		
@@ -102,11 +89,11 @@ public class API {
 		// set the security provider...
 		Security.addProvider(new BouncyCastleProvider());
 		
-		// create a factory for disk-based uploaded file items
-		dfif = new DiskFileItemFactory();
-		File repo = new File(cfg.getString("api.fileupload.repositoryPath"));
-		repo.mkdirs();
-		dfif.setRepository(repo);
+//		 create a factory for disk-based uploaded file items
+//		dfif = new DiskFileItemFactory();
+//		File repo = new File(cfg.getString("api.fileupload.repositoryPath"));
+//		repo.mkdirs();
+//		dfif.setRepository(repo);
 	}
 	
 	private static void startInternalModules() throws Exception {
@@ -120,8 +107,7 @@ public class API {
         // initialize mongo client
 		MongoClient dbClient = new MongoClient(new MongoClientURI(cfg.getString("mongo.address")));
 		
-		// initialize contract interpreter and representative broker engine
-		rbe = new RBEngine(dbClient);
+		// initialize contract interpreter 
 		ci = new ContractInterpreter(cfg, dbClient, dpt);
 	}
 	
@@ -159,24 +145,24 @@ public class API {
         	
         	get("/", (request, response) -> "Blockchain-supported Ledgering API for Decentralized Applications - v1.0");
         	
-        	// functions for deploying contracts (should only be available to providers)
-            get("/deploy", (req, rsp) -> getDeployContract(req, rsp));
-            post("/deploy", (req, rsp) -> {
-            	Pair<String,Exception> result = postDeployContract(req, rsp);
-            	
-            	Exception ex = result.getRight();
-            	
-            	if (ex != null) {
-        	    	rsp.status(500);
-        	    	rsp.type("text/html");
-            		return body().with(
-            			h3(ex.getMessage())
-            		).render();
-            	}
-            	
-            	rsp.redirect("contract/" + result.getLeft());
-            	return null;
-            });
+//        	// functions for deploying contracts (should only be available to providers)
+//            get("/deploy", (req, rsp) -> getDeployContract(req, rsp));
+//            post("/deploy", (req, rsp) -> {
+//            	Pair<String,Exception> result = postDeployContract(req, rsp);
+//            	
+//            	Exception ex = result.getRight();
+//            	
+//            	if (ex != null) {
+//        	    	rsp.status(500);
+//        	    	rsp.type("text/html");
+//            		return body().with(
+//            			h3(ex.getMessage())
+//            		).render();
+//            	}
+//            	
+//            	rsp.redirect("contract/" + result.getLeft());
+//            	return null;
+//            });
         	
             path("/:channel", () -> {
                 
@@ -511,7 +497,6 @@ public class API {
 	
 	private static String getDeployContract(Request req, Response rsp) {
 		// execute action
-		// TODO
 		
 		// return html
     	rsp.status(200);
@@ -576,75 +561,75 @@ public class API {
 		).render();
 	}
 	
-	private static Pair<String, Exception> postDeployContract(Request req, Response rsp) {
-
-		Exception exc = null;
-		
-		// this request includes a file
-		req.attribute("org.eclipse.jetty.multipartConfig", new MultipartConfigElement("/tmp"));
-
-		String chaincodeId = null, chaincodeVersion = null, chaincodeSpecs = null, chaincodePath = null;
-		File chaincodeSourceLocation = new File(dfif.getRepository().getAbsolutePath()), chaincodeFile = null;
-		
-		ServletFileUpload upload = new ServletFileUpload(dfif);
-		upload.setSizeMax(cfg.getLong("api.fileupload.maxSize"));
-
-		// parse the request
-		try {			
-			List<FileItem> items = upload.parseRequest(req.raw());
-			
-			// Process the uploaded items
-			Iterator<FileItem> iter = items.iterator();
-			while (iter.hasNext()) {
-			    FileItem item = iter.next();
-			    // parameters
-			    if (item.isFormField()) {
-			        switch (item.getFieldName()) {
-				        case "contractId":
-				        	chaincodeId = item.getString();
-				        	break;
-				        case "contractVersion":
-				        	chaincodeVersion = item.getString();
-				        	break;
-				        case "contractSpecs":
-				        	chaincodeSpecs = item.getString();
-				        	break;
-			        };
-			    } else {
-			    	// file
-			    	String filename = FilenameUtils.getName(item.getName());
-			    	String fileext = FilenameUtils.getExtension(filename);
-			    	if (fileext == null || !fileext.equals("go")) {
-			    		throw new InvalidFileNameException("Invalid file extension", "Invalid file extension for a contract! (Submit a .go file)");
-			    	}
-			    	
-			    	chaincodeFile = new File(chaincodeSourceLocation.getAbsolutePath() + "/src/" + FilenameUtils.getBaseName(filename) + "/" + filename);
-			    	
-			    	// create cc folders first
-			    	chaincodeFile.getParentFile().mkdirs();
-			    	// write to file
-			        item.write(chaincodeFile);
-			    }
-			}
-			
-			
-			
-			// delegate get contract to interpreter (it will store it on the db after successful install)
-	    	ci.deployContract(chaincodeId, chaincodeVersion, chaincodeSourceLocation, FilenameUtils.getBaseName(chaincodeFile.getParent()), chaincodeSpecs);
-	    	
-		} catch (FileUploadException | InvalidFileNameException | InvalidContractException e) {
-    		exc = e;
-		} catch (Exception e) {
-			e.printStackTrace();
-		}
-		
-    	return new Pair<String, Exception>(chaincodeId, exc);
-	}
+//	private static Pair<String, Exception> postDeployContract(Request req, Response rsp) {
+//
+//		Exception exc = null;
+//		
+//		// this request includes a file
+//		req.attribute("org.eclipse.jetty.multipartConfig", new MultipartConfigElement("/tmp"));
+//
+//		String chaincodeId = null, chaincodeVersion = null, chaincodeSpecs = null, chaincodePath = null;
+//		File chaincodeSourceLocation = new File(dfif.getRepository().getAbsolutePath()), chaincodeFile = null;
+//		
+//		ServletFileUpload upload = new ServletFileUpload(dfif);
+//		upload.setSizeMax(cfg.getLong("api.fileupload.maxSize"));
+//
+//		// parse the request
+//		try {			
+//			List<FileItem> items = upload.parseRequest(req.raw());
+//			
+//			// Process the uploaded items
+//			Iterator<FileItem> iter = items.iterator();
+//			while (iter.hasNext()) {
+//			    FileItem item = iter.next();
+//			    // parameters
+//			    if (item.isFormField()) {
+//			        switch (item.getFieldName()) {
+//				        case "contractId":
+//				        	chaincodeId = item.getString();
+//				        	break;
+//				        case "contractVersion":
+//				        	chaincodeVersion = item.getString();
+//				        	break;
+//				        case "contractSpecs":
+//				        	chaincodeSpecs = item.getString();
+//				        	break;
+//			        };
+//			    } else {
+//			    	// file
+//			    	String filename = FilenameUtils.getName(item.getName());
+//			    	String fileext = FilenameUtils.getExtension(filename);
+//			    	if (fileext == null || !fileext.equals("go")) {
+//			    		throw new InvalidFileNameException("Invalid file extension", "Invalid file extension for a contract! (Submit a .go file)");
+//			    	}
+//			    	
+//			    	chaincodeFile = new File(chaincodeSourceLocation.getAbsolutePath() + "/src/" + FilenameUtils.getBaseName(filename) + "/" + filename);
+//			    	
+//			    	// create cc folders first
+//			    	chaincodeFile.getParentFile().mkdirs();
+//			    	// write to file
+//			        item.write(chaincodeFile);
+//			    }
+//			}
+//			
+//			
+//			
+//			// delegate get contract to interpreter (it will store it on the db after successful install)
+//	    	ci.deployContract(chaincodeId, chaincodeVersion, chaincodeSourceLocation, FilenameUtils.getBaseName(chaincodeFile.getParent()), chaincodeSpecs);
+//	    	
+//		} catch (FileUploadException | InvalidFileNameException | InvalidContractException e) {
+//    		exc = e;
+//		} catch (Exception e) {
+//			e.printStackTrace();
+//		}
+//		
+//    	return new Pair<String, Exception>(chaincodeId, exc);
+//	}
 	
-	private static boolean shouldReturnHtml(Request request) {
-	    String accept = request.headers("Accept");
-	    return accept != null && accept.contains("text/html");
-	}
+//	private static boolean shouldReturnHtml(Request request) {
+//	    String accept = request.headers("Accept");
+//	    return accept != null && accept.contains("text/html");
+//	}
 
 
 }

@@ -48,8 +48,6 @@ public class Dispatcher {
 	
 	public static final int CHAINCODE_QUERY_OPERATION = 0;
 	public static final int CHAINCODE_INVOKE_OPERATION = 1;
-	public static final int CHAINCODE_INSTALL_OPERATION = 2;
-//	public static final int CHAINCODE_INSTANTIATE_OPERATION = 2;
 	
 	
     private static final Logger log = Logger.getLogger(Dispatcher.class);
@@ -110,8 +108,6 @@ public class Dispatcher {
 	    		case CHAINCODE_INVOKE_OPERATION:
 	    			cr = invoke(channel, chaincodeId, chaincodeFn, chaincodeArgs);
 	    			break;
-//	    		case CHAINCODE_INSTALL_OPERATION:
-//	    			in
 	    			
 				default:
 	    			throw new IllegalArgumentException("Unrecognized operation: " + op);
@@ -149,65 +145,68 @@ public class Dispatcher {
     	} 
     }
     
-    // has to be admin
-    public void install(String chaincodeId, String chaincodeVersion, File chaincodeSourceFolder, String chaincodeRelativePath, String[] chaincodeArgs, Contract ecp) throws InvalidArgumentException, IOException, ProposalException {
-    	
-    	Collection<ProposalResponse> successful = new LinkedList<ProposalResponse>();
-    	Collection<ProposalResponse> failed = new LinkedList<ProposalResponse>();
-    	
-    	String channelOnContract = ecp.getContractStringAttr("channel");
-    	
-        // get channel instance from client
-        Channel channel = channels.get(channelOnContract);
-        
-        // create install proposal request
-    	InstallProposalRequest ipr = client.newInstallProposalRequest();
-    	
-        // build cc id providing the chaincode name
-        ChaincodeID CCId = ChaincodeID.newBuilder().setName(chaincodeId).build();
-        ipr.setChaincodeID(CCId);
-        ipr.setChaincodeVersion(chaincodeVersion);
-        // set chaincode folder absolute path and then the chaincode source folder location
-        ipr.setChaincodeSourceLocation(chaincodeSourceFolder);
-        ipr.setChaincodePath(chaincodeRelativePath);
-        ipr.setChaincodeLanguage(Type.GO_LANG);
-        
-//        TODO path on docker, and policy based on interpretation
-//        ipr.setChaincodeEndorsementPolicy(policy);
-        
-//        Collection<Peer> peers = channel.getPeers());
-//        for (Peer p : peers) {
-//            HLFUser appUser = getUser(
-//            		cfg.getString("hlf.client.crtPath"), 
-//            		cfg.getString("hlf.client.keyPath"),
-//                	cfg.getString("hlf.client.username"), 
-//                	cfg.getString("hlf.client.mspid"), 
-//                	cfg.getString("hlf.client.org")
-//                 );
+//    // has to be admin
+//    public void install(String chaincodeId, String chaincodeVersion, File chaincodeSourceFolder, String chaincodeRelativePath, String[] chaincodeArgs, Contract ecp) throws InvalidArgumentException, IOException, ProposalException {
+//    	
+//    	Collection<ProposalResponse> successful = new LinkedList<ProposalResponse>();
+//    	Collection<ProposalResponse> failed = new LinkedList<ProposalResponse>();
+//    	
+//    	String channelToInstall = ecp.getContractStringAttr("channel");
+//    	
+//        // get channel instance from client
+//        Channel channel = channels.get(channelToInstall);
+//        
+//        // create install proposal request
+//    	InstallProposalRequest ipr = client.newInstallProposalRequest();
+//    	
+//        // build cc id providing the chaincode name
+//        ChaincodeID CCId = ChaincodeID.newBuilder().setName(chaincodeId).build();
+//        ipr.setChaincodeID(CCId);
+//        ipr.setChaincodeVersion(chaincodeVersion);
+//        // set chaincode folder absolute path and then the chaincode source folder location
+//        ipr.setChaincodeSourceLocation(chaincodeSourceFolder);
+//        ipr.setChaincodePath(chaincodeRelativePath);
+//        ipr.setChaincodeLanguage(Type.GO_LANG);
+//        
+////        TODO path on docker, and policy based on interpretation
+////        ipr.setChaincodeEndorsementPolicy(policy);
+//        
+//        List<String> peersToInstall = ecp.getContractListAttr("installed-on-nodes");
+//        List<Peer> peersOnChannel = new ArrayList<Peer>(channel.getPeers());
+//        for (Peer p: peersOnChannel) {
+//        	if (!peersToInstall.contains(p.getName()))
+//        		peersOnChannel.remove(p);
 //        }
-        
-        // TODO: MAYBE SEND ONLY TO PEERS WHO IS ADMIN FOR
-        Collection<ProposalResponse> res = client.sendInstallProposal(ipr, channel.getPeers());
-
-        for (ProposalResponse pres : res) {
-            if (pres.getStatus() == ProposalResponse.Status.SUCCESS) {
-                log.info("Successful installed proposal response Txid: " + pres.getTransactionID() + " from peer " + pres.getPeer().getName());
-                successful.add(pres);
-            } else {
-                failed.add(pres);
-            }
-        }
-
-        log.info("Received " + res.size() + " install proposal responses. Successful: " + successful.size() + " . Failed: " + failed.size());
-
-//        if (failed.size() > 0) {
-//            ProposalResponse first = failed.iterator().next();
-//            fail("Not enough endorsers for install :" + successful.size() + ".  " + first.getMessage());
+////        for (Peer p : peers) {
+////            HLFUser appUser = getUser(
+////            		cfg.getString("hlf.client.crtPath"), 
+////            		cfg.getString("hlf.client.keyPath"),
+////                	cfg.getString("hlf.client.username"), 
+////                	cfg.getString("hlf.client.mspid"), 
+////                	cfg.getString("hlf.client.org")
+////                 );
+////        }
+//        // TODO: MAYBE SEND ONLY TO PEERS WHO IS ADMIN FOR
+//        Collection<ProposalResponse> res = client.sendInstallProposal(ipr, peersOnChannel);
+//
+//        for (ProposalResponse pres : res) {
+//            if (pres.getStatus() == ProposalResponse.Status.SUCCESS) {
+//                log.info("Successful installed proposal response Txid: " + pres.getTransactionID() + " from peer " + pres.getPeer().getName());
+//                successful.add(pres);
+//            } else {
+//                failed.add(pres);
+//            }
 //        }
-        
-        
-        
-    }
+//
+//        log.info("Received " + res.size() + " install proposal responses. Successful: " + successful.size() + " . Failed: " + failed.size());
+//
+////        if (failed.size() > 0) {
+////            ProposalResponse first = failed.iterator().next();
+////            fail("Not enough endorsers for install :" + successful.size() + ".  " + first.getMessage());
+////        }
+//        
+//      
+//    }
 
     private ChaincodeResult query(Channel channel, String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws ProposalException, InvalidArgumentException {
     	

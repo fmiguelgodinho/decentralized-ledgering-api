@@ -1,11 +1,6 @@
 package core;
 
-import java.io.File;
-import java.io.IOException;
-
 import org.apache.commons.configuration2.Configuration;
-import org.hyperledger.fabric.sdk.exception.InvalidArgumentException;
-import org.hyperledger.fabric.sdk.exception.ProposalException;
 
 import com.mongodb.BasicDBObject;
 import com.mongodb.DB;
@@ -16,7 +11,6 @@ import com.mongodb.MongoClient;
 
 import core.dto.ChaincodeResult;
 import core.dto.Contract;
-import core.exception.InvalidContractException;
 import integration.Dispatcher;
 
 public class ContractInterpreter {
@@ -106,25 +100,25 @@ public class ContractInterpreter {
 		return rawJsonContract;
 	}
 	
-	public boolean deployContract(String cid, String cver, File csfolder, String cpath, String cspecs) throws InvalidContractException {
-		
-		// set the correct channel
-//		dpt.changeChannel(channel);
-		
-		Contract contract = new Contract(cspecs);
-		if (!contract.conformsToStandard())
-			throw new InvalidContractException("Contract doesn't conform to standard!");
-		
-		// install chaincode
-		try {
-			dpt.install(cid, cver, csfolder, cpath, new String[] { cspecs }, contract.getExtendedContractProperties());
-		} catch (InvalidArgumentException | ProposalException | IOException e) {
-			e.printStackTrace();
-		}
-		
-		// TODO: save to db after successful installation and instantiation
-		
-		return true;
-	}
+//	public boolean deployContract(String cid, String cver, File csfolder, String cpath, String cspecs) throws InvalidContractException {
+//		
+//		// set the correct channel
+////		dpt.changeChannel(channel);
+//		
+//		Contract contract = new Contract(cspecs);
+//		if (!contract.conformsToStandard())
+//			throw new InvalidContractException("Contract doesn't conform to standard!");
+//		
+//		// install chaincode
+//		try {
+//			dpt.install(cid, cver, csfolder, cpath, new String[] { cspecs }, contract.getExtendedContractProperties());
+//		} catch (InvalidArgumentException | ProposalException | IOException e) {
+//			e.printStackTrace();
+//		}
+//		
+//		// TODO: save to db after successful installation and instantiation
+//		
+//		return true;
+//	}
 
 }
