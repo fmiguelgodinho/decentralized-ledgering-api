@@ -2,13 +2,13 @@ import static j2html.TagCreator.body;
 import static j2html.TagCreator.br;
 import static j2html.TagCreator.button;
 import static j2html.TagCreator.div;
+import static j2html.TagCreator.each;
 import static j2html.TagCreator.form;
 import static j2html.TagCreator.h3;
 import static j2html.TagCreator.input;
 import static j2html.TagCreator.p;
 import static j2html.TagCreator.span;
 import static j2html.TagCreator.textarea;
-import static j2html.TagCreator.each;
 import static spark.Spark.get;
 import static spark.Spark.path;
 import static spark.Spark.port;
@@ -48,6 +48,7 @@ import com.mongodb.MongoClientURI;
 import core.ContractInterpreter;
 import core.RBEngine;
 import core.dto.ChaincodeResult;
+import core.exception.InvalidContractException;
 import integration.Dispatcher;
 import spark.Request;
 import spark.Response;
@@ -158,34 +159,26 @@ public class API {
         	
         	get("/", (request, response) -> "Blockchain-supported Ledgering API for Decentralized Applications - v1.0");
         	
-            path("/:channel", () -> {
+        	// functions for deploying contracts (should only be available to providers)
+            get("/deploy", (req, rsp) -> getDeployContract(req, rsp));
+            post("/deploy", (req, rsp) -> {
+            	Pair<String,Exception> result = postDeployContract(req, rsp);
             	
-            	// functions for deploying contracts (should only be available to providers)
-                get("/deploy", (req, rsp) -> getDeployContract(req, rsp));
-                post("/deploy", (req, rsp) -> {
-                	Pair<String,Exception> result = postDeployContract(req, rsp);
-                	
-                	Exception ex = result.getRight();
-                	
-                	if (ex != null) {
-                		if (ex instanceof FileUploadException) {
-                	    	rsp.status(500);
-                	    	rsp.type("text/html");
-                    		return body().with(
-                    			h3(ex.getMessage())
-                    		).render();
-                		} else if (ex instanceof InvalidFileNameException) {
-	            	    	rsp.status(400);
-	            	    	rsp.type("text/html");
-	                		return body().with(
-	                			h3(ex.getMessage())
-	                		).render();
-                		}
-                	}
-                	
-                	rsp.redirect("contract/" + result.getLeft());
-                	return null;
-                });
+            	Exception ex = result.getRight();
+            	
+            	if (ex != null) {
+        	    	rsp.status(500);
+        	    	rsp.type("text/html");
+            		return body().with(
+            			h3(ex.getMessage())
+            		).render();
+            	}
+            	
+            	rsp.redirect("contract/" + result.getLeft());
+            	return null;
+            });
+        	
+            path("/:channel", () -> {
                 
                 path("/contract", () -> {
                 
@@ -501,9 +494,9 @@ public class API {
 	    	if (args.length == 0)
 	    		throw new InvalidArgumentException("No arguments were able to be parsed! Please validate your input!");
 		
-    		dpt.changeChannel(channel);
 			result = dpt.callChaincodeFunction(
 					type, 
+					channel,
 					cid, 
 					oid, 
 					args
@@ -517,8 +510,6 @@ public class API {
 	
 	
 	private static String getDeployContract(Request req, Response rsp) {
-		
-		String channel = req.params(":channel");
 		// execute action
 		// TODO
 		
@@ -591,8 +582,6 @@ public class API {
 		
 		// this request includes a file
 		req.attribute("org.eclipse.jetty.multipartConfig", new MultipartConfigElement("/tmp"));
-		
-		String channel = req.params(":channel");
 
 		String chaincodeId = null, chaincodeVersion = null, chaincodeSpecs = null, chaincodePath = null;
 		File chaincodeSourceLocation = new File(dfif.getRepository().getAbsolutePath()), chaincodeFile = null;
@@ -641,12 +630,10 @@ public class API {
 			
 			
 			// delegate get contract to interpreter (it will store it on the db after successful install)
-	    	ci.deployContract(channel, chaincodeId, chaincodeVersion, chaincodeSourceLocation, FilenameUtils.getBaseName(chaincodeFile.getParent()), chaincodeSpecs);
+	    	ci.deployContract(chaincodeId, chaincodeVersion, chaincodeSourceLocation, FilenameUtils.getBaseName(chaincodeFile.getParent()), chaincodeSpecs);
 	    	
-		} catch (FileUploadException e) {
+		} catch (FileUploadException | InvalidFileNameException | InvalidContractException e) {
     		exc = e;
-		} catch (InvalidFileNameException f) {
-    		exc = f;
 		} catch (Exception e) {
 			e.printStackTrace();
 		}

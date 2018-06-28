@@ -8,11 +8,11 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -20,7 +20,6 @@ import java.util.concurrent.TimeoutException;
 import org.apache.commons.configuration2.Configuration;
 import org.apache.log4j.Logger;
 import org.hyperledger.fabric.sdk.BlockEvent.TransactionEvent;
-import org.hyperledger.fabric.sdk.TransactionRequest.Type;
 import org.hyperledger.fabric.sdk.ChaincodeID;
 import org.hyperledger.fabric.sdk.Channel;
 import org.hyperledger.fabric.sdk.EventHub;
@@ -31,6 +30,7 @@ import org.hyperledger.fabric.sdk.Peer;
 import org.hyperledger.fabric.sdk.ProposalResponse;
 import org.hyperledger.fabric.sdk.QueryByChaincodeRequest;
 import org.hyperledger.fabric.sdk.TransactionProposalRequest;
+import org.hyperledger.fabric.sdk.TransactionRequest.Type;
 import org.hyperledger.fabric.sdk.exception.CryptoException;
 import org.hyperledger.fabric.sdk.exception.InvalidArgumentException;
 import org.hyperledger.fabric.sdk.exception.ProposalException;
@@ -40,8 +40,8 @@ import org.hyperledger.fabric.sdk.security.CryptoSuite;
 import com.google.protobuf.ByteString;
 
 import core.dto.ChaincodeResult;
+import core.dto.Contract;
 import util.NodeConnection;
-import util.Pair;
 
 public class Dispatcher {
 	
@@ -55,8 +55,7 @@ public class Dispatcher {
     private static final Logger log = Logger.getLogger(Dispatcher.class);
     
     private HFClient client;
-    private Map<String,Pair<Channel, NodeConnection[]>> channels;
-    private String currChannel;
+    private ConcurrentMap<String, Channel> channels;
     private Configuration cfg;
     
     public Dispatcher(Configuration cfg, NodeConnection[] nodesOnChannel) throws Exception {
@@ -86,7 +85,7 @@ public class Dispatcher {
         client.setUserContext(appUser);
 
         // init channel map
-        channels = new HashMap<String,Pair<Channel, NodeConnection[]>>();
+        channels = new ConcurrentHashMap<String,Channel>();
         this.setChannel(
     		cfg.getString("hlf.channelName"),
     		nodesOnChannel
@@ -94,20 +93,22 @@ public class Dispatcher {
     }
     
     // use HLFJavaClient.CHAINCODE_QUERY_OPERATION or HLFJavaClient.CHAINCODE_INVOKE_OPERATION
-    public ChaincodeResult callChaincodeFunction(int op, String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws InterruptedException {
+    public ChaincodeResult callChaincodeFunction(int op, String channelName, String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws InterruptedException {
     	
     	ChaincodeResult cr = new ChaincodeResult(ChaincodeResult.CHAINCODE_FAILURE);
     	
     	try {
+    		// set correct channel
+    		Channel channel = changeChannel(channelName);
     		// call corresponding chaincode operation
     		switch (op) {
     		
 	    		case CHAINCODE_QUERY_OPERATION:
-	    			cr = query(chaincodeId, chaincodeFn, chaincodeArgs);
+	    			cr = query(channel, chaincodeId, chaincodeFn, chaincodeArgs);
 	    			break;
 	    			
 	    		case CHAINCODE_INVOKE_OPERATION:
-	    			cr = invoke(chaincodeId, chaincodeFn, chaincodeArgs);
+	    			cr = invoke(channel, chaincodeId, chaincodeFn, chaincodeArgs);
 	    			break;
 //	    		case CHAINCODE_INSTALL_OPERATION:
 //	    			in
@@ -126,42 +127,38 @@ public class Dispatcher {
     	return cr;
     }
     
-    public void changeChannel(String channelName) throws IllegalArgumentException {
+    public Channel changeChannel(String channelName) throws IllegalArgumentException {
     	
     	if (!channels.containsKey(channelName)) {
     		throw new IllegalArgumentException("No such channel exists: " + channelName);
     	}
     	
-    	// set current channel
-    	currChannel = channelName;
+    	// ret current channel
+    	return channels.get(channelName);
     	
     }
     
     public void setChannel(String newChannelName, NodeConnection[] nodesOnChannel) throws InvalidArgumentException, TransactionException {
     	
-    	Pair<Channel,NodeConnection[]> existingChannelCfg = channels.get(newChannelName);
+    	Channel existingChannelCfg = channels.get(newChannelName);
     	
     	// if channel does not exist, initialize new channel on the client side
     	if (existingChannelCfg == null) {
         	Channel newChannel = initChannel(newChannelName, nodesOnChannel);
-            channels.put(newChannelName, new Pair(newChannel, nodesOnChannel));
-    	} else {
-    		// just update peer connections
-    		existingChannelCfg.setRight(nodesOnChannel);
-            channels.put(newChannelName, existingChannelCfg);
-    	}
-    	// set current channel
-    	currChannel = newChannelName;
+            channels.put(newChannelName, newChannel);
+    	} 
     }
     
     // has to be admin
-    public void install(String chaincodeId, String chaincodeVersion, File chaincodeSourceFolder, String chaincodeRelativePath) throws InvalidArgumentException, IOException, ProposalException {
+    public void install(String chaincodeId, String chaincodeVersion, File chaincodeSourceFolder, String chaincodeRelativePath, String[] chaincodeArgs, Contract ecp) throws InvalidArgumentException, IOException, ProposalException {
     	
     	Collection<ProposalResponse> successful = new LinkedList<ProposalResponse>();
     	Collection<ProposalResponse> failed = new LinkedList<ProposalResponse>();
     	
+    	String channelOnContract = ecp.getContractStringAttr("channel");
+    	
         // get channel instance from client
-        Channel channel = channels.get(currChannel).getLeft();
+        Channel channel = channels.get(channelOnContract);
         
         // create install proposal request
     	InstallProposalRequest ipr = client.newInstallProposalRequest();
@@ -177,6 +174,17 @@ public class Dispatcher {
         
 //        TODO path on docker, and policy based on interpretation
 //        ipr.setChaincodeEndorsementPolicy(policy);
+        
+//        Collection<Peer> peers = channel.getPeers());
+//        for (Peer p : peers) {
+//            HLFUser appUser = getUser(
+//            		cfg.getString("hlf.client.crtPath"), 
+//            		cfg.getString("hlf.client.keyPath"),
+//                	cfg.getString("hlf.client.username"), 
+//                	cfg.getString("hlf.client.mspid"), 
+//                	cfg.getString("hlf.client.org")
+//                 );
+//        }
         
         // TODO: MAYBE SEND ONLY TO PEERS WHO IS ADMIN FOR
         Collection<ProposalResponse> res = client.sendInstallProposal(ipr, channel.getPeers());
@@ -201,14 +209,11 @@ public class Dispatcher {
         
     }
 
-    private ChaincodeResult query(String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws ProposalException, InvalidArgumentException {
+    private ChaincodeResult query(Channel channel, String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws ProposalException, InvalidArgumentException {
     	
 
     	Collection<ProposalResponse> successful = new LinkedList<ProposalResponse>();
     	Collection<ProposalResponse> failed = new LinkedList<ProposalResponse>();
-    	
-        // get channel instance from client
-        Channel channel = channels.get(currChannel).getLeft();
         
         // create chaincode request
         QueryByChaincodeRequest qpr = client.newQueryProposalRequest();
@@ -250,14 +255,11 @@ public class Dispatcher {
         return new ChaincodeResult(ChaincodeResult.CHAINCODE_SUCCESS, responseString);
     }
     
-    private ChaincodeResult invoke(String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws ProposalException, InvalidArgumentException, InterruptedException, ExecutionException, TimeoutException {
+    private ChaincodeResult invoke(Channel channel, String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws ProposalException, InvalidArgumentException, InterruptedException, ExecutionException, TimeoutException {
     	
 
     	Collection<ProposalResponse> successful = new LinkedList<ProposalResponse>();
     	Collection<ProposalResponse> failed = new LinkedList<ProposalResponse>();
-    	
-        // get channel instance from client
-        Channel channel = channels.get(currChannel).getLeft();
         
         // create chaincode request
         TransactionProposalRequest tpr = client.newTransactionProposalRequest();

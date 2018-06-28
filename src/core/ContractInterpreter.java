@@ -16,6 +16,7 @@ import com.mongodb.MongoClient;
 
 import core.dto.ChaincodeResult;
 import core.dto.Contract;
+import core.exception.InvalidContractException;
 import integration.Dispatcher;
 
 public class ContractInterpreter {
@@ -85,14 +86,12 @@ public class ContractInterpreter {
 	
 	private String loadContractFromBlockchain(String channel, String cid) {
 		
-		// set the correct channel
-		dpt.changeChannel(channel);
-		
     	// query the chaincode
     	String rawJsonContract = null;
     	try {
     		ChaincodeResult cr = dpt.callChaincodeFunction(
 				Dispatcher.CHAINCODE_QUERY_OPERATION, 
+    			channel,
 				cid, 
 				"getContractDefinition", 
 				new String[] {}								// empty args
@@ -107,14 +106,18 @@ public class ContractInterpreter {
 		return rawJsonContract;
 	}
 	
-	public boolean deployContract(String channel, String cid, String cver, File csfolder, String cpath, String cspecs) {
+	public boolean deployContract(String cid, String cver, File csfolder, String cpath, String cspecs) throws InvalidContractException {
 		
 		// set the correct channel
-		dpt.changeChannel(channel);
+//		dpt.changeChannel(channel);
+		
+		Contract contract = new Contract(cspecs);
+		if (!contract.conformsToStandard())
+			throw new InvalidContractException("Contract doesn't conform to standard!");
 		
 		// install chaincode
 		try {
-			dpt.install(cid, cver, csfolder, cpath);
+			dpt.install(cid, cver, csfolder, cpath, new String[] { cspecs }, contract.getExtendedContractProperties());
 		} catch (InvalidArgumentException | ProposalException | IOException e) {
 			e.printStackTrace();
 		}
