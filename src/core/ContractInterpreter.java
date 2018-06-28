@@ -100,6 +100,21 @@ public class ContractInterpreter {
 		return rawJsonContract;
 	}
 	
+	public ChaincodeResult executeContractFunction(int op, String channelName, String cid, String function, String[] args) {
+		try {
+			return dpt.callChaincodeFunction(
+					op, 
+					channelName,
+					cid, 
+					function, 
+					args
+			);
+		} catch (InterruptedException e) {
+			e.printStackTrace();
+		}
+		return null;
+	}
+	
 //	public boolean deployContract(String cid, String cver, File csfolder, String cpath, String cspecs) throws InvalidContractException {
 //		
 //		// set the correct channel

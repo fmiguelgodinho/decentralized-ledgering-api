@@ -3,6 +3,7 @@ import static j2html.TagCreator.br;
 import static j2html.TagCreator.button;
 import static j2html.TagCreator.div;
 import static j2html.TagCreator.each;
+import static j2html.TagCreator.pre;
 import static j2html.TagCreator.form;
 import static j2html.TagCreator.h3;
 import static j2html.TagCreator.input;
@@ -30,6 +31,7 @@ import org.apache.commons.configuration2.ex.ConfigurationException;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.hyperledger.fabric_ca.sdk.exception.InvalidArgumentException;
 
+import com.fasterxml.jackson.core.JsonParser.Feature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.protobuf.ByteString;
@@ -42,6 +44,7 @@ import integration.Dispatcher;
 import spark.Request;
 import spark.Response;
 import util.NodeConnection;
+import util.Pair;
 
 public class API {
 	
@@ -62,7 +65,6 @@ public class API {
 	private static Configuration cfg;
 	private static Dispatcher dpt;
 	private static ContractInterpreter ci;
-//	private static DiskFileItemFactory dfif;
 	
 	public static void main(String[] args) throws Exception {
 		
@@ -89,11 +91,6 @@ public class API {
 		// set the security provider...
 		Security.addProvider(new BouncyCastleProvider());
 		
-//		 create a factory for disk-based uploaded file items
-//		dfif = new DiskFileItemFactory();
-//		File repo = new File(cfg.getString("api.fileupload.repositoryPath"));
-//		repo.mkdirs();
-//		dfif.setRepository(repo);
 	}
 	
 	private static void startInternalModules() throws Exception {
@@ -175,9 +172,18 @@ public class API {
 	                get("/:cid/query", (req, rsp) -> getQueryOperation(req, rsp));
 	                post("/:cid/query", (req, rsp) -> {
 	                	
-	                	ChaincodeResult result = postQueryOperation(req, rsp);
+	                	Pair<ChaincodeResult,Exception> result = postQueryOperation(req, rsp);
 	                	
-	                	if (result.getStatus() == ChaincodeResult.CHAINCODE_FAILURE) {
+	                	if (result.getRight() != null) {
+                	    	rsp.status(400);
+                	    	rsp.type("text/html");
+                    		return body().with(
+                				h3("Invocation result: FAIL"),
+                    			div(result.getRight().getMessage())
+                    		).render();
+	                	}
+	                	
+	                	if (result.getLeft() == null || result.getLeft().getStatus() == ChaincodeResult.CHAINCODE_FAILURE) {
                 	    	rsp.status(500);
                 	    	rsp.type("text/html");
                     		return body().with(
@@ -190,7 +196,7 @@ public class API {
 	                	rsp.type("text/html");
 	                	return body().with(
 	                			h3("Query result: OK"),
-	                			div("Response: " + result.getContent())
+	                			div("Response: " + result.getLeft().getContent())
 	                	).render();
 	                });
 	                
@@ -198,9 +204,18 @@ public class API {
 	                get("/:cid/invoke", (req, rsp) -> getInvokeOperation(req, rsp));
 	                post("/:cid/invoke", (req, rsp) -> {
 	                	
-	                	ChaincodeResult result = postInvokeOperation(req, rsp);
+	                	Pair<ChaincodeResult,Exception> result = postInvokeOperation(req, rsp);
 	                	
-	                	if (result.getStatus() == ChaincodeResult.CHAINCODE_FAILURE) {
+	                	if (result.getRight() != null) {
+                	    	rsp.status(400);
+                	    	rsp.type("text/html");
+                    		return body().with(
+                				h3("Invocation result: FAIL"),
+                    			div(result.getRight().getMessage())
+                    		).render();
+	                	}
+
+	                	if (result.getLeft() == null || result.getLeft().getStatus() == ChaincodeResult.CHAINCODE_FAILURE) {
                 	    	rsp.status(500);
                 	    	rsp.type("text/html");
                     		return body().with(
@@ -209,7 +224,7 @@ public class API {
                     		).render();
 	                	}
 	                	
-	                	List<ByteString> signatures = result.getSignatures();
+	                	List<ByteString> signatures = result.getLeft().getSignatures();
 	                	List<String> sigResult = new ArrayList<String>();
 	                	for (ByteString sig : signatures) {
 	                		byte[] b64sig = Base64.getEncoder().encode(sig.toByteArray());
@@ -220,7 +235,7 @@ public class API {
 	                	rsp.type("text/html");
 	                	return body().with(
 	                			h3("Invocation result: OK"),
-	                			div("Timestamp: " + result.getTimestamp().toString()),
+	                			div("Timestamp: " + result.getLeft().getTimestamp().toString()),
 	                			div("Signature(s): "),
 	                			br(),
 	                			each(sigResult, sig -> div(
@@ -260,6 +275,7 @@ public class API {
     	// found. return json in pretty print
 		try {
 			ObjectMapper mapper = new ObjectMapper();
+			mapper.configure(Feature.ALLOW_UNQUOTED_CONTROL_CHARS, true);
 			JsonNode resultObject = mapper.readTree(result);
 	    	result = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(resultObject);
 		} catch (IOException e) {
@@ -274,7 +290,21 @@ public class API {
 		    div().with(
 		    	p("Below is all metadata related with the contract:")
 		    ),
-		    div(result)
+		    pre(result),
+		    br(),
+		    span("NOT SIGNED").withStyle("color:red"), // TODO: change this accordingly if signed or not
+		    br(),
+		    br(),
+		    form()
+	    	.withMethod("POST")
+	    	.withAction(cid + "/sign")
+	    	.withId("signContractForm")
+	    	.with(
+	    		span().with(
+	    			button("Accept & sign").withType("submit"),
+	    			button("Reject").withType("cancel")
+			    )
+	    	)
 		).render();
 	}
 	
@@ -448,16 +478,16 @@ public class API {
 		).render();
 	}
 	
-	private static ChaincodeResult postQueryOperation(Request req, Response rsp) {
+	private static Pair<ChaincodeResult,Exception> postQueryOperation(Request req, Response rsp) {
     	return postOperation(req, rsp, Dispatcher.CHAINCODE_QUERY_OPERATION);
 	}
 	
 	
-	private static ChaincodeResult postInvokeOperation(Request req, Response rsp) {
+	private static Pair<ChaincodeResult,Exception> postInvokeOperation(Request req, Response rsp) {
     	return postOperation(req, rsp, Dispatcher.CHAINCODE_INVOKE_OPERATION);
 	}
 	
-	private static ChaincodeResult postOperation(Request req, Response rsp, int type) {
+	private static Pair<ChaincodeResult,Exception> postOperation(Request req, Response rsp, int type) {
 		
 		Exception exc = null;
 		
@@ -479,19 +509,14 @@ public class API {
 		try {
 	    	if (args.length == 0)
 	    		throw new InvalidArgumentException("No arguments were able to be parsed! Please validate your input!");
-		
-			result = dpt.callChaincodeFunction(
-					type, 
-					channel,
-					cid, 
-					oid, 
-					args
-			);
-		} catch (InvalidArgumentException | InterruptedException e) {
-			e.printStackTrace();
+	    	
+	    	result = ci.executeContractFunction(type, channel, cid, oid, args);
+	    	
+		} catch (InvalidArgumentException e) {
+			exc = e;
 		} 
     	
-    	return result;
+    	return new Pair<ChaincodeResult,Exception>(result, exc);
 	}
 	
 	
