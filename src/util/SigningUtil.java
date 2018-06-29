@@ -42,7 +42,7 @@ public class SigningUtil {
     	
     	Signature sig = Signature.getInstance("SHA256withRSA");
     	sig.initSign(privKey);
-    	sig.update(toSignBytes);
+    	sig.update(new String(toSignBytes).trim().getBytes());
     	byte[] signature = sig.sign();
     	
     	String b64Sig = new String(Base64.getEncoder().encode(signature));

@@ -352,41 +352,6 @@ public class API {
 		// get again the contract the client "supposedly" signed
     	String contract = "abc";//ci.getContractRaw(channel, cid
 
-    	
-    	try {
-	    	String keyPath = "test/pkcs8_key";
-	    	File privKeyFile = new File(keyPath);
-	    	BufferedInputStream bis = new BufferedInputStream(new FileInputStream(privKeyFile));
-	
-	    	byte[] privKeyBytes = new byte[(int)privKeyFile.length()];
-	    	bis.read(privKeyBytes);
-	    	bis.close();
-	    	KeyFactory keyFactory = KeyFactory.getInstance("RSA");
-	    	KeySpec ks = new PKCS8EncodedKeySpec(privKeyBytes);
-	    	RSAPrivateKey privKey = (RSAPrivateKey) keyFactory.generatePrivate(ks);
-	    	
-	    	Signature sigsign = Signature.getInstance("SHA256withRSA");
-	    	sigsign.initSign(privKey);
-	    	sigsign.update(contract.getBytes());
-	    	byte[] signature = sigsign.sign();
-	    	
-	    	String b64Str = new String(Base64.getEncoder().encode(signature));
-	    	
-	    	// very
-	    	byte[] toVerify = Base64.getDecoder().decode(b64Str.getBytes());
-	    	
-	    	
-        	Signature sigver = Signature.getInstance("SHA256withRSA");
-        	sigver.initVerify(clientPubKey);
-        	sigver.update(contract.getBytes());
-        	boolean isValid = sigver.verify(signature);
-	    	
-        	System.out.println(isValid);
-
-    	} catch(Exception e) {
-    		e.printStackTrace();
-    	};
-    	
     	try {
 
     		byte[] contractBytes = contract.getBytes("UTF-8");
@@ -407,7 +372,7 @@ public class API {
         	sig.initVerify(clientPubKey);
         	sig.update(contractBytes, 0, contractBytes.length);
         	boolean isValid = sig.verify(clientSigNob64);
-        	System.err.println(isValid );
+        	System.err.println(isValid);
         	
 		} catch (InvalidKeyException | NoSuchAlgorithmException | SignatureException e) {
 			
