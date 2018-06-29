@@ -3,11 +3,11 @@ import static j2html.TagCreator.br;
 import static j2html.TagCreator.button;
 import static j2html.TagCreator.div;
 import static j2html.TagCreator.each;
-import static j2html.TagCreator.pre;
 import static j2html.TagCreator.form;
 import static j2html.TagCreator.h3;
 import static j2html.TagCreator.input;
 import static j2html.TagCreator.p;
+import static j2html.TagCreator.pre;
 import static j2html.TagCreator.span;
 import static j2html.TagCreator.textarea;
 import static spark.Spark.get;
@@ -17,10 +17,23 @@ import static spark.Spark.post;
 import static spark.Spark.secure;
 import static spark.Spark.threadPool;
 
+import java.io.BufferedInputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
+import java.security.InvalidKeyException;
+import java.security.KeyFactory;
+import java.security.NoSuchAlgorithmException;
+import java.security.PublicKey;
 import java.security.Security;
+import java.security.Signature;
+import java.security.SignatureException;
+import java.security.cert.X509Certificate;
+import java.security.interfaces.RSAPrivateKey;
+import java.security.spec.KeySpec;
+import java.security.spec.PKCS8EncodedKeySpec;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
@@ -63,7 +76,6 @@ public class API {
 	};
 	
 	private static Configuration cfg;
-	private static Dispatcher dpt;
 	private static ContractInterpreter ci;
 	
 	public static void main(String[] args) throws Exception {
@@ -96,7 +108,7 @@ public class API {
 	private static void startInternalModules() throws Exception {
 		
         // initialize dispatcher
-        dpt = new Dispatcher(
+        Dispatcher dpt = new Dispatcher(
         	cfg,
     		HLF_INTEGRATION_CHANNEL_NODES
     	);     
@@ -124,8 +136,7 @@ public class API {
     		cfg.getString("api.ssl.truststorePath"),
     		cfg.getString("api.ssl.truststorePw"),
     		cfg.getBoolean("api.ssl.muthualAuth")
-    	);
-        
+    	);  
          
 
         // setup routing		
@@ -167,6 +178,7 @@ public class API {
                 
 	                // get contract specification
 	                get("/:cid", (req, rsp) -> getContract(req, rsp));
+	                post("/:cid/sign", (req, rsp) -> postContractSign(req, rsp));
 	                
 	                // query contract
 	                get("/:cid/query", (req, rsp) -> getQueryOperation(req, rsp));
@@ -236,7 +248,7 @@ public class API {
 	                	return body().with(
 	                			h3("Invocation result: OK"),
 	                			div("Timestamp: " + result.getLeft().getTimestamp().toString()),
-	                			div("Signature(s): "),
+	                			div("Peer endorsement signature(s): "),
 	                			br(),
 	                			each(sigResult, sig -> div(
                 					sig
@@ -273,11 +285,12 @@ public class API {
     	}
     	
     	// found. return json in pretty print
+    	String prettyprintResult = null;
 		try {
 			ObjectMapper mapper = new ObjectMapper();
 			mapper.configure(Feature.ALLOW_UNQUOTED_CONTROL_CHARS, true);
 			JsonNode resultObject = mapper.readTree(result);
-	    	result = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(resultObject);
+			prettyprintResult = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(resultObject);
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
@@ -290,9 +303,11 @@ public class API {
 		    div().with(
 		    	p("Below is all metadata related with the contract:")
 		    ),
-		    pre(result),
+		    pre(prettyprintResult),
 		    br(),
-		    span("NOT SIGNED").withStyle("color:red"), // TODO: change this accordingly if signed or not
+		    div("NOT SIGNED").withStyle("color:red"), // TODO: change this accordingly if signed or not
+		    div("Please hash and sign the above contract (save it to a file, then hash it and sign it using openssl), copy the signature to the field below (in base64 formart) and submit it if you agree with the contract."),
+		    div("Use the following signature algorithm: SHA256withRSA"),
 		    br(),
 		    br(),
 		    form()
@@ -300,82 +315,108 @@ public class API {
 	    	.withAction(cid + "/sign")
 	    	.withId("signContractForm")
 	    	.with(
-	    		span().with(
-	    			button("Accept & sign").withType("submit"),
-	    			button("Reject").withType("cancel")
-			    )
+	    		div(
+	    			textarea()
+			    	.attr("form", "signContractForm")
+			    	.attr("rows", 20)
+			    	.attr("cols", 70)
+			    	.withId("signature")
+			    	.withName("signature")
+			    	.isRequired()
+	    		),
+	    		div().with(
+		    		span().with(
+		    			button("Accept & sign").withType("submit"),
+		    			button("Reject").withType("cancel")
+				    )
+	    		)
 	    	)
 		).render();
 	}
 	
-//	private static String getRecordsList(Request req, Response rsp) {
-//
-//		String channel = req.params(":channel");
-//    	String cid = req.params(":cid");
-//		// execute action
-//    	
-//    	String result = null;
-//    	//TODO maybe? use the contract interpreter for this
-//    	// dynamically using logic of contract
-//    	try {
-//    		dpt.changeChannel(channel);
-//			result = dpt.callChaincodeFunction(
-//					Dispatcher.CHAINCODE_QUERY_OPERATION, 
-//					cid, 
-//					"queryAll", 
-//					new String[] {}
-//			);
-//		} catch (InterruptedException e) {
-//			e.printStackTrace();
-//		}
-//    	
-//		
-//		// return html
-//    	rsp.status(200);
-//    	rsp.type("text/html");
-//		return body().with(
-//		    h3("Contract ID: " + cid),
-//		    div().with(
-//		    	p("Below is a list of records related with the contract:")
-//		    ),
-//		    div(result)
-//		).render();
-//	}
-//	
-//	private static String getRecordDetails(Request req, Response rsp) {
-//		
-//		String channel = req.params(":channel");
-//    	String cid = req.params(":cid");
-//    	String key = req.params(":key");
-//		// execute action
-//    	
-//    	String result = null;
-//    	//TODO maybe? use the contract interpreter for this
-//    	// dynamically using logic of contract
-//    	try {
-//    		dpt.changeChannel(channel);
-//			result = dpt.callChaincodeFunction(
-//					Dispatcher.CHAINCODE_QUERY_OPERATION, 
-//					cid, 
-//					"query", 
-//					new String[] {
-//							key, "true" // view history
-//					}
-//			);
-//		} catch (InterruptedException e) {
-//			e.printStackTrace();
-//		}
-//		
-//		// return html
-//    	rsp.status(200);
-//    	rsp.type("text/html");
-//		return body().with(
-//		    h3("Record Key: " + key),
-//		    div().with(
-//		    	p("Below is all data related with the specified record:")
-//		    )
-//		).render();
-//	}
+	private static String postContractSign(Request req, Response rsp) throws UnsupportedEncodingException {
+		
+		String channel = req.params(":channel");
+		String cid = req.params(":cid");
+    	String clientSig = req.queryParams("signature");
+
+    	// remove 64 enconding
+    	byte[] clientSigNob64 = Base64.getDecoder().decode(clientSig.getBytes("UTF-8"));
+    	
+	
+		// get client crt first
+		X509Certificate[] crtList = (X509Certificate[]) req.raw().getAttribute("javax.servlet.request.X509Certificate");
+		PublicKey clientPubKey = crtList[0].getPublicKey();
+		String clientSigAlg = crtList[0].getSigAlgName();
+		
+		// get again the contract the client "supposedly" signed
+    	String contract = "abc";//ci.getContractRaw(channel, cid
+
+    	
+    	try {
+	    	String keyPath = "test/pkcs8_key";
+	    	File privKeyFile = new File(keyPath);
+	    	BufferedInputStream bis = new BufferedInputStream(new FileInputStream(privKeyFile));
+	
+	    	byte[] privKeyBytes = new byte[(int)privKeyFile.length()];
+	    	bis.read(privKeyBytes);
+	    	bis.close();
+	    	KeyFactory keyFactory = KeyFactory.getInstance("RSA");
+	    	KeySpec ks = new PKCS8EncodedKeySpec(privKeyBytes);
+	    	RSAPrivateKey privKey = (RSAPrivateKey) keyFactory.generatePrivate(ks);
+	    	
+	    	Signature sigsign = Signature.getInstance("SHA256withRSA");
+	    	sigsign.initSign(privKey);
+	    	sigsign.update(contract.getBytes());
+	    	byte[] signature = sigsign.sign();
+	    	
+	    	String b64Str = new String(Base64.getEncoder().encode(signature));
+	    	
+	    	// very
+	    	byte[] toVerify = Base64.getDecoder().decode(b64Str.getBytes());
+	    	
+	    	
+        	Signature sigver = Signature.getInstance("SHA256withRSA");
+        	sigver.initVerify(clientPubKey);
+        	sigver.update(contract.getBytes());
+        	boolean isValid = sigver.verify(signature);
+	    	
+        	System.out.println(isValid);
+
+    	} catch(Exception e) {
+    		e.printStackTrace();
+    	};
+    	
+    	try {
+
+    		byte[] contractBytes = contract.getBytes("UTF-8");
+    		
+//        	// found. return json in pretty print
+//        	String prettyprintResult = null;
+//    		try {
+//    			ObjectMapper mapper = new ObjectMapper();
+//    			mapper.configure(Feature.ALLOW_UNQUOTED_CONTROL_CHARS, true);
+//    			JsonNode resultObject = mapper.readTree(contract);
+//    			prettyprintResult = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(resultObject);
+//    		} catch (IOException e) {
+//    			e.printStackTrace();
+//    		}
+    		
+        	// verify sig
+        	Signature sig = Signature.getInstance(clientSigAlg);
+        	sig.initVerify(clientPubKey);
+        	sig.update(contractBytes, 0, contractBytes.length);
+        	boolean isValid = sig.verify(clientSigNob64);
+        	System.err.println(isValid );
+        	
+		} catch (InvalidKeyException | NoSuchAlgorithmException | SignatureException e) {
+			
+			e.printStackTrace();
+		}
+		
+		
+		return null;
+	}
 	
 	private static String getQueryOperation(Request req, Response rsp) {
 		
@@ -520,72 +561,72 @@ public class API {
 	}
 	
 	
-	private static String getDeployContract(Request req, Response rsp) {
-		// execute action
-		
-		// return html
-    	rsp.status(200);
-    	rsp.type("text/html");
-		return body().with(
-		    h3("Deploy Contract"),
-		    div().with(
-		    	p("Fill in deployment details:"),
-		    	br(),
-		    	form()
-		    	.withId("deployContractForm")
-		    	.withMethod("POST")
-		    	.withAction("deploy")
-		    	.attr("enctype", "multipart/form-data")
-		    	.with(
-				    	// contract id
-				    	span("Contract ID: "),
-				    	input()
-				    	.withType("text")
-				    	.withId("contractId")
-				    	.withName("contractId")
-				    	.withPlaceholder("e.g. examplecc")
-				    	.isRequired(),
-				    	br(),
-				    	
-				    	// contract id
-				    	span("Contract version: "),
-				    	input()
-				    	.withType("text")
-				    	.withId("contractVersion")
-				    	.withName("contractVersion")
-				    	.withPlaceholder("e.g. 1 (or > 1 if you're upgrading an existing contract)")
-				    	.isRequired(),
-				    	br(),
-				    	
-				    	// contract specs
-				    	div("Contract specification to instantiate the contract (has to comply with standard): "),
-				    	textarea()
-				    	.attr("rows", 20)
-				    	.attr("cols", 70)
-				    	.attr("form", "deployContractForm")
-				    	.withId("contractSpecs")
-				    	.withName("contractSpecs")
-				    	.withPlaceholder("e.g. \n\n{\n\t\"extended-contract-properties\" : { \n\t\t\"consensus-nodes\" : [ ], \n\t\t\"consensus-type\" : \"bft\", \n\t\t\"signature-type\" : \"multisig\", \n\t\t\"signing-nodes\" : [ ] \n\t}, \n\t\"application-specific-properties\" : { \n\t\t\"max-records\" : 100, \n\t\t\"total-records\" : 0 \n\t} \n}")
-				    	.isRequired(),
-				    	br(),
-				    	
-				    	// contract chaincode (in Golang)
-				    	span("Contract source file: "),
-				    	input()
-				    	.withType("file")
-				    	.withId("contractFile")
-				    	.withName("contractFile")
-				    	.isRequired(),
-				    	br(),
-
-				    	// submit
-				    	button("Deploy")
-				    	.withType("submit")
-		    	)
-		    )
-		).render();
-	}
-	
+//	private static String getDeployContract(Request req, Response rsp) {
+//		// execute action
+//		
+//		// return html
+//    	rsp.status(200);
+//    	rsp.type("text/html");
+//		return body().with(
+//		    h3("Deploy Contract"),
+//		    div().with(
+//		    	p("Fill in deployment details:"),
+//		    	br(),
+//		    	form()
+//		    	.withId("deployContractForm")
+//		    	.withMethod("POST")
+//		    	.withAction("deploy")
+//		    	.attr("enctype", "multipart/form-data")
+//		    	.with(
+//				    	// contract id
+//				    	span("Contract ID: "),
+//				    	input()
+//				    	.withType("text")
+//				    	.withId("contractId")
+//				    	.withName("contractId")
+//				    	.withPlaceholder("e.g. examplecc")
+//				    	.isRequired(),
+//				    	br(),
+//				    	
+//				    	// contract id
+//				    	span("Contract version: "),
+//				    	input()
+//				    	.withType("text")
+//				    	.withId("contractVersion")
+//				    	.withName("contractVersion")
+//				    	.withPlaceholder("e.g. 1 (or > 1 if you're upgrading an existing contract)")
+//				    	.isRequired(),
+//				    	br(),
+//				    	
+//				    	// contract specs
+//				    	div("Contract specification to instantiate the contract (has to comply with standard): "),
+//				    	textarea()
+//				    	.attr("rows", 20)
+//				    	.attr("cols", 70)
+//				    	.attr("form", "deployContractForm")
+//				    	.withId("contractSpecs")
+//				    	.withName("contractSpecs")
+//				    	.withPlaceholder("e.g. \n\n{\n\t\"extended-contract-properties\" : { \n\t\t\"consensus-nodes\" : [ ], \n\t\t\"consensus-type\" : \"bft\", \n\t\t\"signature-type\" : \"multisig\", \n\t\t\"signing-nodes\" : [ ] \n\t}, \n\t\"application-specific-properties\" : { \n\t\t\"max-records\" : 100, \n\t\t\"total-records\" : 0 \n\t} \n}")
+//				    	.isRequired(),
+//				    	br(),
+//				    	
+//				    	// contract chaincode (in Golang)
+//				    	span("Contract source file: "),
+//				    	input()
+//				    	.withType("file")
+//				    	.withId("contractFile")
+//				    	.withName("contractFile")
+//				    	.isRequired(),
+//				    	br(),
+//
+//				    	// submit
+//				    	button("Deploy")
+//				    	.withType("submit")
+//		    	)
+//		    )
+//		).render();
+//	}
+//	
 //	private static Pair<String, Exception> postDeployContract(Request req, Response rsp) {
 //
 //		Exception exc = null;
