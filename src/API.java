@@ -17,23 +17,18 @@ import static spark.Spark.post;
 import static spark.Spark.secure;
 import static spark.Spark.threadPool;
 
-import java.io.BufferedInputStream;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.security.InvalidKeyException;
-import java.security.KeyFactory;
+import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.PublicKey;
 import java.security.Security;
 import java.security.Signature;
 import java.security.SignatureException;
 import java.security.cert.X509Certificate;
-import java.security.interfaces.RSAPrivateKey;
-import java.security.spec.KeySpec;
-import java.security.spec.PKCS8EncodedKeySpec;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
@@ -271,6 +266,16 @@ public class API {
     	// delegate get contract to interpreter
     	String result = ci.getContractRaw(channel, cid);
     	
+		// produce an hash of the contract
+    	String contractHash = null;
+		try {
+			MessageDigest md = MessageDigest.getInstance("SHA-256");
+			md.update(result.getBytes());
+			contractHash = new String(Base64.getEncoder().encode(md.digest()));
+		} catch (NoSuchAlgorithmException e) {
+			e.printStackTrace();
+		}
+    	
     	// if not found
     	if (result == null) {
     		
@@ -294,6 +299,8 @@ public class API {
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
+		
+
 
 		// return html
     	rsp.status(200);
@@ -306,9 +313,7 @@ public class API {
 		    pre(prettyprintResult),
 		    br(),
 		    div("NOT SIGNED").withStyle("color:red"), // TODO: change this accordingly if signed or not
-		    div("Please hash and sign the above contract (save it to a file, then hash it and sign it using openssl), copy the signature to the field below (in base64 formart) and submit it if you agree with the contract."),
-		    div("Use the following signature algorithm: SHA256withRSA"),
-		    br(),
+		    div("Please sign the below hash (using openssl or an utility) with your private key, copy the signature to the field below (in base64 format) and press accept if you agree with the contract."),
 		    br(),
 		    form()
 	    	.withMethod("POST")
@@ -316,10 +321,16 @@ public class API {
 	    	.withId("signContractForm")
 	    	.with(
 	    		div(
+	    			textarea(contractHash)
+			    	.attr("rows", 20)
+			    	.attr("cols", 100)
+			    	.attr("readonly")
+		    	),
+	    		div(
 	    			textarea()
 			    	.attr("form", "signContractForm")
 			    	.attr("rows", 20)
-			    	.attr("cols", 70)
+			    	.attr("cols", 100)
 			    	.withId("signature")
 			    	.withName("signature")
 			    	.isRequired()
@@ -350,32 +361,24 @@ public class API {
 		String clientSigAlg = crtList[0].getSigAlgName();
 		
 		// get again the contract the client "supposedly" signed
-    	String contract = "abc";//ci.getContractRaw(channel, cid
+    	String contract = ci.getContractRaw(channel, cid);
 
-    	try {
+    	try {    		
 
-    		byte[] contractBytes = contract.getBytes("UTF-8");
-    		
-//        	// found. return json in pretty print
-//        	String prettyprintResult = null;
-//    		try {
-//    			ObjectMapper mapper = new ObjectMapper();
-//    			mapper.configure(Feature.ALLOW_UNQUOTED_CONTROL_CHARS, true);
-//    			JsonNode resultObject = mapper.readTree(contract);
-//    			prettyprintResult = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(resultObject);
-//    		} catch (IOException e) {
-//    			e.printStackTrace();
-//    		}
+    		// produce an hash of the contract
+			MessageDigest md = MessageDigest.getInstance("SHA-256");
+			md.update(contract.getBytes());
+			byte[] contractHashBytes = Base64.getEncoder().encode(md.digest());
+
     		
         	// verify sig
         	Signature sig = Signature.getInstance(clientSigAlg);
         	sig.initVerify(clientPubKey);
-        	sig.update(contractBytes, 0, contractBytes.length);
+        	sig.update(contractHashBytes, 0, contractHashBytes.length);
         	boolean isValid = sig.verify(clientSigNob64);
         	System.err.println(isValid);
         	
 		} catch (InvalidKeyException | NoSuchAlgorithmException | SignatureException e) {
-			
 			e.printStackTrace();
 		}
 		
