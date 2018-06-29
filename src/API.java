@@ -322,17 +322,18 @@ public class API {
 	    	.with(
 	    		div(
 	    			textarea(contractHash)
-			    	.attr("rows", 20)
+			    	.attr("rows", 4)
 			    	.attr("cols", 100)
 			    	.attr("readonly")
 		    	),
 	    		div(
 	    			textarea()
 			    	.attr("form", "signContractForm")
-			    	.attr("rows", 20)
+			    	.attr("rows", 10)
 			    	.attr("cols", 100)
 			    	.withId("signature")
 			    	.withName("signature")
+			    	.withPlaceholder("Paste your signature here.")
 			    	.isRequired()
 	    		),
 	    		div().with(
