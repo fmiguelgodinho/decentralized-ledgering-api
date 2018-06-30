@@ -52,6 +52,7 @@ public class SigningUtil {
     	bos.flush();
     	bos.close();
     	
+    	System.out.println("Result: \n" + b64Sig);
 	}
 
 }

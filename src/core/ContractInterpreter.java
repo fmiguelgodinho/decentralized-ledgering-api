@@ -4,12 +4,15 @@ import java.io.UnsupportedEncodingException;
 import java.security.InvalidKeyException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.security.PublicKey;
 import java.security.Signature;
 import java.security.SignatureException;
 import java.security.cert.X509Certificate;
+import java.util.Arrays;
 import java.util.Base64;
 
 import org.apache.commons.configuration2.Configuration;
+import org.apache.commons.lang3.ArrayUtils;
 import org.hyperledger.fabric.protos.peer.Chaincode;
 
 import com.mongodb.BasicDBObject;
@@ -86,10 +89,11 @@ public class ContractInterpreter {
     		
     		if (isCorrectlySigned) {
     			// call sign fn
+
     			byte[] pubKey = Base64.getEncoder().encode(signerCrt.getPublicKey().getEncoded());
     			
-	        	executeContractFunction(
-	        			Dispatcher.CHAINCODE_INVOKE_OPERATION, 
+    			dpt.callChaincodeFunction(
+    					Dispatcher.CHAINCODE_INVOKE_OPERATION, 
 	        			channel, 
 	        			cid,
 	        			"signContract", 
@@ -97,10 +101,10 @@ public class ContractInterpreter {
 	    					signature,
 	    					new String(pubKey)
 	        			}
-	        	);
+    			);
     		}
     		
-		} catch (InvalidKeyException | NoSuchAlgorithmException | SignatureException | UnsupportedEncodingException e) {
+		} catch (InvalidKeyException | NoSuchAlgorithmException | SignatureException | UnsupportedEncodingException | InterruptedException e) {
 			e.printStackTrace();
 		}
     	
@@ -162,8 +166,14 @@ public class ContractInterpreter {
 		return rawJsonContract;
 	}
 	
-	public ChaincodeResult executeContractFunction(int op, String channelName, String cid, String function, String[] args) {
+	public ChaincodeResult executeContractFunction(int op, String channelName, String cid, String function, X509Certificate clientCrt, String[] args) {
 		try {
+
+			byte[] pubKey = Base64.getEncoder().encode(clientCrt.getPublicKey().getEncoded());
+
+			// put signature on first argument!
+			args = ArrayUtils.insert(0, args, new String(pubKey));
+			
 			return dpt.callChaincodeFunction(
 					op, 
 					channelName,

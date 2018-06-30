@@ -346,6 +346,11 @@ public class API {
 		).render();
 	}
 	
+	private static X509Certificate extractClientCrt(Request req) {
+		X509Certificate[] crtList = (X509Certificate[]) req.raw().getAttribute("javax.servlet.request.X509Certificate");
+		return crtList[0];
+	}
+	
 	private static String postContractSign(Request req, Response rsp) throws UnsupportedEncodingException {
 		
 		String channel = req.params(":channel");
@@ -353,8 +358,7 @@ public class API {
     	String clientSig = req.queryParams("signature");
 	
 		// get client crt first
-		X509Certificate[] crtList = (X509Certificate[]) req.raw().getAttribute("javax.servlet.request.X509Certificate");
-    	ci.signContract(channel, cid, crtList[0], clientSig);
+    	ci.signContract(channel, cid, extractClientCrt(req), clientSig);
         	
 		return null;
 	}
@@ -492,7 +496,7 @@ public class API {
 	    	if (args.length == 0)
 	    		throw new InvalidArgumentException("No arguments were able to be parsed! Please validate your input!");
 	    	
-	    	result = ci.executeContractFunction(type, channel, cid, oid, args);
+	    	result = ci.executeContractFunction(type, channel, cid, oid, extractClientCrt(req), args);
 	    	
 		} catch (InvalidArgumentException e) {
 			exc = e;
