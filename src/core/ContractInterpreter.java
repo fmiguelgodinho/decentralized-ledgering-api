@@ -1,6 +1,16 @@
 package core;
 
+import java.io.UnsupportedEncodingException;
+import java.security.InvalidKeyException;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.security.Signature;
+import java.security.SignatureException;
+import java.security.cert.X509Certificate;
+import java.util.Base64;
+
 import org.apache.commons.configuration2.Configuration;
+import org.hyperledger.fabric.protos.peer.Chaincode;
 
 import com.mongodb.BasicDBObject;
 import com.mongodb.DB;
@@ -59,6 +69,58 @@ public class ContractInterpreter {
 		if (rawContract != null)
 			saveRawContractToDB(channel, cid, rawContract);
 		return rawContract;
+	}
+	
+	public boolean signContract(String channel, String cid, X509Certificate signerCrt, String signature) {
+		
+		// get again the contract the client "supposedly" signed
+    	String contract = getContractRaw(channel, cid);
+
+		
+    	// verify sig
+    	boolean isCorrectlySigned = false;
+    	try {
+        	// remove 64 enconding
+        	byte[] signatureBytes = Base64.getDecoder().decode(signature.getBytes("UTF-8"));
+    		isCorrectlySigned = verifySignature(contract, signerCrt, signatureBytes);
+    		
+    		if (isCorrectlySigned) {
+    			// call sign fn
+    			byte[] pubKey = Base64.getEncoder().encode(signerCrt.getPublicKey().getEncoded());
+    			
+	        	executeContractFunction(
+	        			Dispatcher.CHAINCODE_INVOKE_OPERATION, 
+	        			channel, 
+	        			cid,
+	        			"signContract", 
+	        			new String[] {
+	    					signature,
+	    					new String(pubKey)
+	        			}
+	        	);
+    		}
+    		
+		} catch (InvalidKeyException | NoSuchAlgorithmException | SignatureException | UnsupportedEncodingException e) {
+			e.printStackTrace();
+		}
+    	
+
+    	
+		return false;
+	}
+	
+	private boolean verifySignature(String contract, X509Certificate signerCrt, byte[] signature) throws NoSuchAlgorithmException, InvalidKeyException, SignatureException {
+		
+		// produce an hash of the contract
+		MessageDigest md = MessageDigest.getInstance("SHA-256");
+		md.update(contract.getBytes());
+		byte[] contractHashBytes = Base64.getEncoder().encode(md.digest());
+		
+    	Signature sig = Signature.getInstance(signerCrt.getSigAlgName());
+		sig.initVerify(signerCrt.getPublicKey());
+		
+    	sig.update(contractHashBytes, 0, contractHashBytes.length);
+    	return sig.verify(signature);
 	}
 	
 	private String loadContractFromDb(String channel, String cid) {

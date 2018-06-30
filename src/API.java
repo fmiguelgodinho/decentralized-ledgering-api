@@ -313,7 +313,7 @@ public class API {
 		    pre(prettyprintResult),
 		    br(),
 		    div("NOT SIGNED").withStyle("color:red"), // TODO: change this accordingly if signed or not
-		    div("Please sign the below hash (using openssl or an utility) with your private key, copy the signature to the field below (in base64 format) and press accept if you agree with the contract."),
+		    div("Please sign the below SHA256 hash of the contract with your private key (using openssl or an utility), copy the signature to the field below (in base64 format) and press accept if you agree with the contract."),
 		    br(),
 		    form()
 	    	.withMethod("POST")
@@ -351,39 +351,11 @@ public class API {
 		String channel = req.params(":channel");
 		String cid = req.params(":cid");
     	String clientSig = req.queryParams("signature");
-
-    	// remove 64 enconding
-    	byte[] clientSigNob64 = Base64.getDecoder().decode(clientSig.getBytes("UTF-8"));
-    	
 	
 		// get client crt first
 		X509Certificate[] crtList = (X509Certificate[]) req.raw().getAttribute("javax.servlet.request.X509Certificate");
-		PublicKey clientPubKey = crtList[0].getPublicKey();
-		String clientSigAlg = crtList[0].getSigAlgName();
-		
-		// get again the contract the client "supposedly" signed
-    	String contract = ci.getContractRaw(channel, cid);
-
-    	try {    		
-
-    		// produce an hash of the contract
-			MessageDigest md = MessageDigest.getInstance("SHA-256");
-			md.update(contract.getBytes());
-			byte[] contractHashBytes = Base64.getEncoder().encode(md.digest());
-
-    		
-        	// verify sig
-        	Signature sig = Signature.getInstance(clientSigAlg);
-        	sig.initVerify(clientPubKey);
-        	sig.update(contractHashBytes, 0, contractHashBytes.length);
-        	boolean isValid = sig.verify(clientSigNob64);
-        	System.err.println(isValid);
+    	ci.signContract(channel, cid, crtList[0], clientSig);
         	
-		} catch (InvalidKeyException | NoSuchAlgorithmException | SignatureException e) {
-			e.printStackTrace();
-		}
-		
-		
 		return null;
 	}
 	
