@@ -28,19 +28,13 @@ import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeoutException;
 
 import org.apache.commons.configuration2.Configuration;
 import org.apache.commons.configuration2.builder.fluent.Configurations;
 import org.apache.commons.configuration2.ex.ConfigurationException;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
-import org.hyperledger.fabric.sdk.exception.ProposalException;
 import org.hyperledger.fabric_ca.sdk.exception.InvalidArgumentException;
 
-import com.fasterxml.jackson.core.JsonParser.Feature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.protobuf.ByteString;
 import com.mongodb.MongoClient;
 import com.mongodb.MongoClientURI;
@@ -320,7 +314,7 @@ public class API {
 			    	.attr("readonly")
 		    	),
 	    		div(
-	    			textarea()
+	    			textarea(contract.getSignature() != null && !contract.getSignature().isEmpty()? contract.getSignature() : "")
 			    	.attr("form", "signContractForm")
 			    	.attr("rows", 10)
 			    	.attr("cols", 100)
@@ -330,7 +324,6 @@ public class API {
 			    			"Paste your signature here."
 			    	)
 			    	.isRequired()
-			    	.withCondValue(contract.getSignature() != null && !contract.getSignature().isEmpty(), contract.getSignature())
 	    		),
 	    		div().with(
 		    		span().with(

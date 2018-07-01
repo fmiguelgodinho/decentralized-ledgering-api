@@ -21,6 +21,10 @@ public class Contract {
 		this.isSection = true;
 	}
 	
+	public Contract(String rawJsonContract) {
+		this(rawJsonContract, null);
+	}
+	
 	@SuppressWarnings("unchecked")
 	public Contract(String rawJsonContract, String rawJsonSignature) {
 		// read json and put into an hashmap

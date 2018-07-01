@@ -22,7 +22,6 @@ import com.mongodb.DBCollection;
 import com.mongodb.DBCursor;
 import com.mongodb.DBObject;
 import com.mongodb.MongoClient;
-import com.mongodb.WriteResult;
 
 import core.dto.ChaincodeResult;
 import core.dto.Contract;
@@ -49,12 +48,16 @@ public class ContractInterpreter {
 		
 		// build obj being saved
 		final DBObject contractObj = new BasicDBObject()
-				.append("key", key)
 				.append("contract", contract.getRawRepresentation())
 				.append("signature", contract.getSignature());
 		
-		// save to db (upsert)u
-		contractCollection.update(key, contractObj, true, false);
+		// save to db (upsert)
+		contractCollection.update(
+				new BasicDBObject().append("_id", key), 
+				contractObj, 
+				true, 
+				false
+		);
 	}
 	
 	public Contract getContract(String channel, String cid, X509Certificate clientCrt) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
@@ -134,7 +137,7 @@ public class ContractInterpreter {
 		
 		// recreate key
 		final DBObject key = new BasicDBObject()
-				.append("key", new BasicDBObject()
+				.append("_id", new BasicDBObject()
 					.append("channelId", channel)
 					.append("contractId", cid));
 		
@@ -152,7 +155,10 @@ public class ContractInterpreter {
 		if (contract == null)
 			return null;
 		
-		return new Contract(contract,signature);
+		Contract contractObj = new Contract(contract);
+		contractObj.sign(signature);
+		
+		return contractObj;
 	}
 	
 	private Contract loadContractFromBlockchain(String channel, String cid, X509Certificate clientCrt) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
