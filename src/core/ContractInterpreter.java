@@ -4,16 +4,17 @@ import java.io.UnsupportedEncodingException;
 import java.security.InvalidKeyException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.security.PublicKey;
 import java.security.Signature;
 import java.security.SignatureException;
 import java.security.cert.X509Certificate;
-import java.util.Arrays;
 import java.util.Base64;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeoutException;
 
 import org.apache.commons.configuration2.Configuration;
 import org.apache.commons.lang3.ArrayUtils;
-import org.hyperledger.fabric.protos.peer.Chaincode;
+import org.hyperledger.fabric.sdk.exception.InvalidArgumentException;
+import org.hyperledger.fabric.sdk.exception.ProposalException;
 
 import com.mongodb.BasicDBObject;
 import com.mongodb.DB;
@@ -52,13 +53,13 @@ public class ContractInterpreter {
 		contractCollection.insert(contractObj);
 	}
 	
-	public Contract getContract(String channel, String cid) {
+	public Contract getContract(String channel, String cid, X509Certificate clientCrt) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
 		// encapsulate in Contract object
-		String rawContract = getContractRaw(channel, cid);
+		String rawContract = getContractRaw(channel, cid, clientCrt);
 		return new Contract(rawContract);
 	}
 	
-	public String getContractRaw(String channel, String cid) {
+	public String getContractRaw(String channel, String cid, X509Certificate clientCrt) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
 		
 		// try to first load it from db - quicker
 		String rawContract = loadContractFromDb(channel, cid);
@@ -66,7 +67,10 @@ public class ContractInterpreter {
 			return rawContract;
 		
 		// it wasn't in db! try to retrieve it from blockchain - slower
-		rawContract = loadContractFromBlockchain(channel, cid);
+		ChaincodeResult cr = loadContractFromBlockchain(channel, cid, clientCrt);
+		if (cr.getStatus() == ChaincodeResult.CHAINCODE_SUCCESS) {
+			rawContract = cr.getContent();
+		}
 		
 		// save contract to db for future times
 		if (rawContract != null)
@@ -74,10 +78,10 @@ public class ContractInterpreter {
 		return rawContract;
 	}
 	
-	public boolean signContract(String channel, String cid, X509Certificate signerCrt, String signature) {
+	public boolean signContract(String channel, String cid, X509Certificate clientCrt, String signature) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
 		
 		// get again the contract the client "supposedly" signed
-    	String contract = getContractRaw(channel, cid);
+    	String contract = getContractRaw(channel, cid, clientCrt);
 
 		
     	// verify sig
@@ -85,26 +89,26 @@ public class ContractInterpreter {
     	try {
         	// remove 64 enconding
         	byte[] signatureBytes = Base64.getDecoder().decode(signature.getBytes("UTF-8"));
-    		isCorrectlySigned = verifySignature(contract, signerCrt, signatureBytes);
+    		isCorrectlySigned = verifySignature(contract, clientCrt, signatureBytes);
     		
     		if (isCorrectlySigned) {
     			// call sign fn
 
-    			byte[] pubKey = Base64.getEncoder().encode(signerCrt.getPublicKey().getEncoded());
+    			byte[] pubKey = Base64.getEncoder().encode(clientCrt.getPublicKey().getEncoded());
     			
-    			dpt.callChaincodeFunction(
+    			executeContractFunction(
     					Dispatcher.CHAINCODE_INVOKE_OPERATION, 
 	        			channel, 
 	        			cid,
 	        			"signContract", 
+	        			clientCrt,
 	        			new String[] {
-	    					signature,
-	    					new String(pubKey)
+	    					signature
 	        			}
     			);
     		}
     		
-		} catch (InvalidKeyException | NoSuchAlgorithmException | SignatureException | UnsupportedEncodingException | InterruptedException e) {
+		} catch (InvalidKeyException | NoSuchAlgorithmException | SignatureException | UnsupportedEncodingException e) {
 			e.printStackTrace();
 		}
     	
@@ -144,29 +148,20 @@ public class ContractInterpreter {
 		return (String) cursor.one().get("contract");
 	}
 	
-	private String loadContractFromBlockchain(String channel, String cid) {
+	private ChaincodeResult loadContractFromBlockchain(String channel, String cid, X509Certificate clientCrt) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
 		
     	// query the chaincode
-    	String rawJsonContract = null;
-    	try {
-    		ChaincodeResult cr = dpt.callChaincodeFunction(
-				Dispatcher.CHAINCODE_QUERY_OPERATION, 
-    			channel,
-				cid, 
-				"getContractDefinition", 
-				new String[] {}								// empty args
-			);
-    		if (cr.getStatus() == ChaincodeResult.CHAINCODE_SUCCESS) {
-    			rawJsonContract = cr.getContent();
-    		}
-		} catch (InterruptedException e) {
-			e.printStackTrace();
-		}
-    	
-		return rawJsonContract;
+    	return executeContractFunction(
+			Dispatcher.CHAINCODE_QUERY_OPERATION, 
+			channel,
+			cid, 
+			"getContractDefinition", 
+			clientCrt,
+			new String[] {}								// empty args
+		);
 	}
 	
-	public ChaincodeResult executeContractFunction(int op, String channelName, String cid, String function, X509Certificate clientCrt, String[] args) {
+	public ChaincodeResult executeContractFunction(int op, String channelName, String cid, String function, X509Certificate clientCrt, String[] args) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
 		try {
 
 			byte[] pubKey = Base64.getEncoder().encode(clientCrt.getPublicKey().getEncoded());
@@ -185,6 +180,18 @@ public class ContractInterpreter {
 			e.printStackTrace();
 		}
 		return null;
+	}
+
+	public ChaincodeResult getContractSignature(String channel, String cid, X509Certificate clientCrt) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
+    	// query the chaincode
+    	return executeContractFunction(
+			Dispatcher.CHAINCODE_QUERY_OPERATION, 
+			channel,
+			cid, 
+			"getContractSignature", 
+			clientCrt,
+			new String[] {}								// empty args
+		);
 	}
 	
 //	public boolean deployContract(String cid, String cver, File csfolder, String cpath, String cspecs) throws InvalidContractException {

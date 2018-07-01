@@ -21,22 +21,21 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
-import java.security.InvalidKeyException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.security.PublicKey;
 import java.security.Security;
-import java.security.Signature;
-import java.security.SignatureException;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeoutException;
 
 import org.apache.commons.configuration2.Configuration;
 import org.apache.commons.configuration2.builder.fluent.Configurations;
 import org.apache.commons.configuration2.ex.ConfigurationException;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
+import org.hyperledger.fabric.sdk.exception.ProposalException;
 import org.hyperledger.fabric_ca.sdk.exception.InvalidArgumentException;
 
 import com.fasterxml.jackson.core.JsonParser.Feature;
@@ -147,26 +146,7 @@ public class API {
 //        	});
         	
         	get("/", (request, response) -> "Blockchain-supported Ledgering API for Decentralized Applications - v1.0");
-        	
-//        	// functions for deploying contracts (should only be available to providers)
-//            get("/deploy", (req, rsp) -> getDeployContract(req, rsp));
-//            post("/deploy", (req, rsp) -> {
-//            	Pair<String,Exception> result = postDeployContract(req, rsp);
-//            	
-//            	Exception ex = result.getRight();
-//            	
-//            	if (ex != null) {
-//        	    	rsp.status(500);
-//        	    	rsp.type("text/html");
-//            		return body().with(
-//            			h3(ex.getMessage())
-//            		).render();
-//            	}
-//            	
-//            	rsp.redirect("contract/" + result.getLeft());
-//            	return null;
-//            });
-        	
+
             path("/:channel", () -> {
                 
                 path("/contract", () -> {
@@ -186,7 +166,8 @@ public class API {
                 	    	rsp.type("text/html");
                     		return body().with(
                 				h3("Invocation result: FAIL"),
-                    			div(result.getRight().getMessage())
+                    			div(result.getRight().getMessage()),
+                    			div(result.getRight().getCause() != null? result.getRight().getCause().getMessage() : "")
                     		).render();
 	                	}
 	                	
@@ -218,7 +199,8 @@ public class API {
                 	    	rsp.type("text/html");
                     		return body().with(
                 				h3("Invocation result: FAIL"),
-                    			div(result.getRight().getMessage())
+                    			div(result.getRight().getMessage()),
+                    			div(result.getRight().getCause() != null? result.getRight().getCause().getMessage() : "")
                     		).render();
 	                	}
 
@@ -264,37 +246,46 @@ public class API {
     	String cid = req.params(":cid");
     	
     	// delegate get contract to interpreter
-    	String result = ci.getContractRaw(channel, cid);
-    	
-		// produce an hash of the contract
-    	String contractHash = null;
+    	String contract = null;
 		try {
-			MessageDigest md = MessageDigest.getInstance("SHA-256");
-			md.update(result.getBytes());
-			contractHash = new String(Base64.getEncoder().encode(md.digest()));
-		} catch (NoSuchAlgorithmException e) {
-			e.printStackTrace();
-		}
-    	
-    	// if not found
-    	if (result == null) {
-    		
+			contract = ci.getContractRaw(channel, cid, extractClientCrt(req));
+		} catch (Exception e) {
     		rsp.status(404);
     		rsp.type("text/html");
     		return body().with(
     			h3("Couldn't find the contract you specified!"),
     			div().with(
-    				p("Make sure you've typed its ID correctly and that it exists.")
+    				p("Make sure you've typed its ID correctly and that it exists."),
+    				p(e.getMessage())
     			)
     		).render();
-    	}
+		}
+		
+		// check signature state of the contract
+    	ChaincodeResult crSignature = null;
+		try {
+			crSignature = ci.getContractSignature(channel, cid, extractClientCrt(req));
+		} catch (Exception e) {
+			// let it go
+		}
+    	
+		
+		// produce an hash of the contract
+    	String contractHash = null;
+		try {
+			MessageDigest md = MessageDigest.getInstance("SHA-256");
+			md.update(contract.getBytes());
+			contractHash = new String(Base64.getEncoder().encode(md.digest()));
+		} catch (NoSuchAlgorithmException e) {
+			e.printStackTrace();
+		}
     	
     	// found. return json in pretty print
     	String prettyprintResult = null;
 		try {
 			ObjectMapper mapper = new ObjectMapper();
 			mapper.configure(Feature.ALLOW_UNQUOTED_CONTROL_CHARS, true);
-			JsonNode resultObject = mapper.readTree(result);
+			JsonNode resultObject = mapper.readTree(contract);
 			prettyprintResult = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(resultObject);
 		} catch (IOException e) {
 			e.printStackTrace();
@@ -312,8 +303,15 @@ public class API {
 		    ),
 		    pre(prettyprintResult),
 		    br(),
-		    div("NOT SIGNED").withStyle("color:red"), // TODO: change this accordingly if signed or not
-		    div("Please sign the below SHA256 hash of the contract with your private key (using openssl or an utility), copy the signature to the field below (in base64 format) and press accept if you agree with the contract."),
+		    crSignature == null? 
+		    		div("There was a problem while checking contract signatures... Can't check if it was signed already or not.") :
+		    		crSignature.getStatus() == ChaincodeResult.CHAINCODE_SUCCESS && !crSignature.getContent().isEmpty()?
+		    				div("SIGNED").withStyle("color:green") :
+	    					div("NOT SIGNED").withStyle("color:red"), 
+		    				
+		    crSignature != null && crSignature.getStatus() == ChaincodeResult.CHAINCODE_SUCCESS && !crSignature.getContent().isEmpty()? 
+		    		div("Contract is signed. Below is the SHA256 hash of the contract and your signature."):
+		    		div("Please sign the below SHA256 hash of the contract with your private key (using openssl or an utility), copy the signature to the field below (in base64 format) and press accept if you agree with the contract."),
 		    br(),
 		    form()
 	    	.withMethod("POST")
@@ -333,13 +331,22 @@ public class API {
 			    	.attr("cols", 100)
 			    	.withId("signature")
 			    	.withName("signature")
-			    	.withPlaceholder("Paste your signature here.")
+			    	.withPlaceholder(
+			    			"Paste your signature here."
+			    	)
 			    	.isRequired()
+			    	.withCondValue(crSignature != null && ChaincodeResult.CHAINCODE_SUCCESS == crSignature.getStatus() && !crSignature.getContent().isEmpty(), crSignature.getContent())
 	    		),
 	    		div().with(
 		    		span().with(
-		    			button("Accept & sign").withType("submit"),
-		    			button("Reject").withType("cancel")
+		    				
+		    			button("Accept & sign")
+		    			.withType("submit")
+		    			.withCondHidden(crSignature != null && ChaincodeResult.CHAINCODE_SUCCESS == crSignature.getStatus() && !crSignature.getContent().isEmpty()),
+		    			
+		    			button("Reject")
+		    			.withType("cancel")
+		    			.withCondHidden(crSignature != null && ChaincodeResult.CHAINCODE_SUCCESS == crSignature.getStatus() && !crSignature.getContent().isEmpty())
 				    )
 	    		)
 	    	)
@@ -351,16 +358,22 @@ public class API {
 		return crtList[0];
 	}
 	
-	private static String postContractSign(Request req, Response rsp) throws UnsupportedEncodingException {
+	private static Pair<ChaincodeResult,Exception> postContractSign(Request req, Response rsp) throws UnsupportedEncodingException {
+		
+		Exception exc = null;
 		
 		String channel = req.params(":channel");
 		String cid = req.params(":cid");
     	String clientSig = req.queryParams("signature");
 	
 		// get client crt first
-    	ci.signContract(channel, cid, extractClientCrt(req), clientSig);
+    	try {
+			ci.signContract(channel, cid, extractClientCrt(req), clientSig);
+		} catch (Exception e) {
+			exc = e;
+		}
         	
-		return null;
+		return new Pair<ChaincodeResult,Exception>(null,exc);
 	}
 	
 	private static String getQueryOperation(Request req, Response rsp) {
@@ -368,7 +381,6 @@ public class API {
 		String channel = req.params(":channel");
 		String cid = req.params(":cid");
 		// execute action
-		// TODO
 		
 		// return html
     	rsp.status(200);
@@ -417,7 +429,6 @@ public class API {
 		String channel = req.params(":channel");
 		String cid = req.params(":cid");
 		// execute action
-		// TODO
 		
 		// return html
     	rsp.status(200);
@@ -483,7 +494,6 @@ public class API {
     	String oargs = req.queryParams("operationArgs");
     	
     	ChaincodeResult result = null;
-    	//TODO maybe? use the contract interpreter for this
     	// dynamically using logic of contract
     	// 280f06d6-2c1d-48fc-a5ba-3bfacc42ba08 | { "foo": 123, "bar": "abc" }
     	
@@ -498,145 +508,13 @@ public class API {
 	    	
 	    	result = ci.executeContractFunction(type, channel, cid, oid, extractClientCrt(req), args);
 	    	
-		} catch (InvalidArgumentException e) {
+		} catch (Exception e) {
 			exc = e;
 		} 
     	
     	return new Pair<ChaincodeResult,Exception>(result, exc);
 	}
-	
-	
-//	private static String getDeployContract(Request req, Response rsp) {
-//		// execute action
-//		
-//		// return html
-//    	rsp.status(200);
-//    	rsp.type("text/html");
-//		return body().with(
-//		    h3("Deploy Contract"),
-//		    div().with(
-//		    	p("Fill in deployment details:"),
-//		    	br(),
-//		    	form()
-//		    	.withId("deployContractForm")
-//		    	.withMethod("POST")
-//		    	.withAction("deploy")
-//		    	.attr("enctype", "multipart/form-data")
-//		    	.with(
-//				    	// contract id
-//				    	span("Contract ID: "),
-//				    	input()
-//				    	.withType("text")
-//				    	.withId("contractId")
-//				    	.withName("contractId")
-//				    	.withPlaceholder("e.g. examplecc")
-//				    	.isRequired(),
-//				    	br(),
-//				    	
-//				    	// contract id
-//				    	span("Contract version: "),
-//				    	input()
-//				    	.withType("text")
-//				    	.withId("contractVersion")
-//				    	.withName("contractVersion")
-//				    	.withPlaceholder("e.g. 1 (or > 1 if you're upgrading an existing contract)")
-//				    	.isRequired(),
-//				    	br(),
-//				    	
-//				    	// contract specs
-//				    	div("Contract specification to instantiate the contract (has to comply with standard): "),
-//				    	textarea()
-//				    	.attr("rows", 20)
-//				    	.attr("cols", 70)
-//				    	.attr("form", "deployContractForm")
-//				    	.withId("contractSpecs")
-//				    	.withName("contractSpecs")
-//				    	.withPlaceholder("e.g. \n\n{\n\t\"extended-contract-properties\" : { \n\t\t\"consensus-nodes\" : [ ], \n\t\t\"consensus-type\" : \"bft\", \n\t\t\"signature-type\" : \"multisig\", \n\t\t\"signing-nodes\" : [ ] \n\t}, \n\t\"application-specific-properties\" : { \n\t\t\"max-records\" : 100, \n\t\t\"total-records\" : 0 \n\t} \n}")
-//				    	.isRequired(),
-//				    	br(),
-//				    	
-//				    	// contract chaincode (in Golang)
-//				    	span("Contract source file: "),
-//				    	input()
-//				    	.withType("file")
-//				    	.withId("contractFile")
-//				    	.withName("contractFile")
-//				    	.isRequired(),
-//				    	br(),
-//
-//				    	// submit
-//				    	button("Deploy")
-//				    	.withType("submit")
-//		    	)
-//		    )
-//		).render();
-//	}
-//	
-//	private static Pair<String, Exception> postDeployContract(Request req, Response rsp) {
-//
-//		Exception exc = null;
-//		
-//		// this request includes a file
-//		req.attribute("org.eclipse.jetty.multipartConfig", new MultipartConfigElement("/tmp"));
-//
-//		String chaincodeId = null, chaincodeVersion = null, chaincodeSpecs = null, chaincodePath = null;
-//		File chaincodeSourceLocation = new File(dfif.getRepository().getAbsolutePath()), chaincodeFile = null;
-//		
-//		ServletFileUpload upload = new ServletFileUpload(dfif);
-//		upload.setSizeMax(cfg.getLong("api.fileupload.maxSize"));
-//
-//		// parse the request
-//		try {			
-//			List<FileItem> items = upload.parseRequest(req.raw());
-//			
-//			// Process the uploaded items
-//			Iterator<FileItem> iter = items.iterator();
-//			while (iter.hasNext()) {
-//			    FileItem item = iter.next();
-//			    // parameters
-//			    if (item.isFormField()) {
-//			        switch (item.getFieldName()) {
-//				        case "contractId":
-//				        	chaincodeId = item.getString();
-//				        	break;
-//				        case "contractVersion":
-//				        	chaincodeVersion = item.getString();
-//				        	break;
-//				        case "contractSpecs":
-//				        	chaincodeSpecs = item.getString();
-//				        	break;
-//			        };
-//			    } else {
-//			    	// file
-//			    	String filename = FilenameUtils.getName(item.getName());
-//			    	String fileext = FilenameUtils.getExtension(filename);
-//			    	if (fileext == null || !fileext.equals("go")) {
-//			    		throw new InvalidFileNameException("Invalid file extension", "Invalid file extension for a contract! (Submit a .go file)");
-//			    	}
-//			    	
-//			    	chaincodeFile = new File(chaincodeSourceLocation.getAbsolutePath() + "/src/" + FilenameUtils.getBaseName(filename) + "/" + filename);
-//			    	
-//			    	// create cc folders first
-//			    	chaincodeFile.getParentFile().mkdirs();
-//			    	// write to file
-//			        item.write(chaincodeFile);
-//			    }
-//			}
-//			
-//			
-//			
-//			// delegate get contract to interpreter (it will store it on the db after successful install)
-//	    	ci.deployContract(chaincodeId, chaincodeVersion, chaincodeSourceLocation, FilenameUtils.getBaseName(chaincodeFile.getParent()), chaincodeSpecs);
-//	    	
-//		} catch (FileUploadException | InvalidFileNameException | InvalidContractException e) {
-//    		exc = e;
-//		} catch (Exception e) {
-//			e.printStackTrace();
-//		}
-//		
-//    	return new Pair<String, Exception>(chaincodeId, exc);
-//	}
-	
+		
 //	private static boolean shouldReturnHtml(Request request) {
 //	    String accept = request.headers("Accept");
 //	    return accept != null && accept.contains("text/html");
