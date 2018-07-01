@@ -22,6 +22,7 @@ import com.mongodb.DBCollection;
 import com.mongodb.DBCursor;
 import com.mongodb.DBObject;
 import com.mongodb.MongoClient;
+import com.mongodb.WriteResult;
 
 import core.dto.ChaincodeResult;
 import core.dto.Contract;
@@ -40,50 +41,43 @@ public class ContractInterpreter {
 		this.dpt = dpt;
 	}
 	
-	public void saveRawContractToDB(String channel, String cid, String rawContract) {
+	public void saveRawContractToDB(String channel, String cid, Contract contract) {
+		
+		final DBObject key = new BasicDBObject()
+				.append("channelId", channel)
+				.append("contractId", cid);
 		
 		// build obj being saved
 		final DBObject contractObj = new BasicDBObject()
-				.append("key", new BasicDBObject()
-					.append("channelId", channel)
-					.append("contractId", cid))
-				.append("contract", rawContract);
+				.append("key", key)
+				.append("contract", contract.getRawRepresentation())
+				.append("signature", contract.getSignature());
 		
-		// save to db
-		contractCollection.insert(contractObj);
+		// save to db (upsert)u
+		contractCollection.update(key, contractObj, true, false);
 	}
 	
 	public Contract getContract(String channel, String cid, X509Certificate clientCrt) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
-		// encapsulate in Contract object
-		String rawContract = getContractRaw(channel, cid, clientCrt);
-		return new Contract(rawContract);
-	}
-	
-	public String getContractRaw(String channel, String cid, X509Certificate clientCrt) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
 		
 		// try to first load it from db - quicker
-		String rawContract = loadContractFromDb(channel, cid);
-		if (rawContract != null)
-			return rawContract;
+		Contract contract = loadContractFromDb(channel, cid);
+		if (contract != null)
+			return contract;
 		
 		// it wasn't in db! try to retrieve it from blockchain - slower
-		ChaincodeResult cr = loadContractFromBlockchain(channel, cid, clientCrt);
-		if (cr.getStatus() == ChaincodeResult.CHAINCODE_SUCCESS) {
-			rawContract = cr.getContent();
-		}
+		contract = loadContractFromBlockchain(channel, cid, clientCrt);
 		
 		// save contract to db for future times
-		if (rawContract != null)
-			saveRawContractToDB(channel, cid, rawContract);
-		return rawContract;
+		if (contract != null)
+			saveRawContractToDB(channel, cid, contract);
+		return contract;
 	}
 	
 	public boolean signContract(String channel, String cid, X509Certificate clientCrt, String signature) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
 		
 		// get again the contract the client "supposedly" signed
-    	String contract = getContractRaw(channel, cid, clientCrt);
-
-		
+    	Contract contract = getContract(channel, cid, clientCrt);
+    	
     	// verify sig
     	boolean isCorrectlySigned = false;
     	try {
@@ -92,20 +86,25 @@ public class ContractInterpreter {
     		isCorrectlySigned = verifySignature(contract, clientCrt, signatureBytes);
     		
     		if (isCorrectlySigned) {
-    			// call sign fn
-
-    			byte[] pubKey = Base64.getEncoder().encode(clientCrt.getPublicKey().getEncoded());
     			
-    			executeContractFunction(
-    					Dispatcher.CHAINCODE_INVOKE_OPERATION, 
-	        			channel, 
-	        			cid,
-	        			"signContract", 
-	        			clientCrt,
-	        			new String[] {
-	    					signature
-	        			}
+    			// call sign fn
+    			ChaincodeResult cr = executeContractFunction(
+					Dispatcher.CHAINCODE_INVOKE_OPERATION, 
+        			channel, 
+        			cid,
+        			"signContract", 
+        			clientCrt,
+        			new String[] {
+    					signature
+        			}
     			);
+    			
+    			// save to db
+    			if (cr.getStatus() == ChaincodeResult.CHAINCODE_SUCCESS) {
+    				contract.sign(signature);
+    				saveRawContractToDB(channel, cid, contract);
+    			}
+    			return true;
     		}
     		
 		} catch (InvalidKeyException | NoSuchAlgorithmException | SignatureException | UnsupportedEncodingException e) {
@@ -117,11 +116,11 @@ public class ContractInterpreter {
 		return false;
 	}
 	
-	private boolean verifySignature(String contract, X509Certificate signerCrt, byte[] signature) throws NoSuchAlgorithmException, InvalidKeyException, SignatureException {
+	private boolean verifySignature(Contract contract, X509Certificate signerCrt, byte[] signature) throws NoSuchAlgorithmException, InvalidKeyException, SignatureException {
 		
 		// produce an hash of the contract
 		MessageDigest md = MessageDigest.getInstance("SHA-256");
-		md.update(contract.getBytes());
+		md.update(contract.getRawRepresentation().getBytes());
 		byte[] contractHashBytes = Base64.getEncoder().encode(md.digest());
 		
     	Signature sig = Signature.getInstance(signerCrt.getSigAlgName());
@@ -131,7 +130,7 @@ public class ContractInterpreter {
     	return sig.verify(signature);
 	}
 	
-	private String loadContractFromDb(String channel, String cid) {
+	private Contract loadContractFromDb(String channel, String cid) {
 		
 		// recreate key
 		final DBObject key = new BasicDBObject()
@@ -145,13 +144,21 @@ public class ContractInterpreter {
 		if (cursor.count() == 0) 
 			return null;
 		
-		return (String) cursor.one().get("contract");
+		DBObject result = cursor.one();
+
+		String contract = (String) result.get("contract");
+		String signature = (String) result.get("signature");
+		
+		if (contract == null)
+			return null;
+		
+		return new Contract(contract,signature);
 	}
 	
-	private ChaincodeResult loadContractFromBlockchain(String channel, String cid, X509Certificate clientCrt) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
+	private Contract loadContractFromBlockchain(String channel, String cid, X509Certificate clientCrt) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
 		
     	// query the chaincode
-    	return executeContractFunction(
+    	ChaincodeResult cr1 = executeContractFunction(
 			Dispatcher.CHAINCODE_QUERY_OPERATION, 
 			channel,
 			cid, 
@@ -159,6 +166,22 @@ public class ContractInterpreter {
 			clientCrt,
 			new String[] {}								// empty args
 		);
+    	
+    	ChaincodeResult cr2 = executeContractFunction(
+			Dispatcher.CHAINCODE_QUERY_OPERATION, 
+			channel,
+			cid,
+			"getContractSignature", 
+			clientCrt,
+			new String[] {}								// empty args
+		);
+    	
+    	if (cr1.getStatus() == ChaincodeResult.CHAINCODE_SUCCESS && cr2.getStatus() == ChaincodeResult.CHAINCODE_SUCCESS) {
+    		return new Contract(cr1.getContent(), cr2.getContent());
+    	}
+    	
+    	// shouldn't get here
+    	return null;
 	}
 	
 	public ChaincodeResult executeContractFunction(int op, String channelName, String cid, String function, X509Certificate clientCrt, String[] args) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
@@ -181,38 +204,5 @@ public class ContractInterpreter {
 		}
 		return null;
 	}
-
-	public ChaincodeResult getContractSignature(String channel, String cid, X509Certificate clientCrt) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
-    	// query the chaincode
-    	return executeContractFunction(
-			Dispatcher.CHAINCODE_QUERY_OPERATION, 
-			channel,
-			cid, 
-			"getContractSignature", 
-			clientCrt,
-			new String[] {}								// empty args
-		);
-	}
-	
-//	public boolean deployContract(String cid, String cver, File csfolder, String cpath, String cspecs) throws InvalidContractException {
-//		
-//		// set the correct channel
-////		dpt.changeChannel(channel);
-//		
-//		Contract contract = new Contract(cspecs);
-//		if (!contract.conformsToStandard())
-//			throw new InvalidContractException("Contract doesn't conform to standard!");
-//		
-//		// install chaincode
-//		try {
-//			dpt.install(cid, cver, csfolder, cpath, new String[] { cspecs }, contract.getExtendedContractProperties());
-//		} catch (InvalidArgumentException | ProposalException | IOException e) {
-//			e.printStackTrace();
-//		}
-//		
-//		// TODO: save to db after successful installation and instantiation
-//		
-//		return true;
-//	}
 
 }

@@ -47,6 +47,7 @@ import com.mongodb.MongoClientURI;
 
 import core.ContractInterpreter;
 import core.dto.ChaincodeResult;
+import core.dto.Contract;
 import integration.Dispatcher;
 import spark.Request;
 import spark.Response;
@@ -153,7 +154,23 @@ public class API {
                 
 	                // get contract specification
 	                get("/:cid", (req, rsp) -> getContract(req, rsp));
-	                post("/:cid/sign", (req, rsp) -> postContractSign(req, rsp));
+	                post("/:cid/sign", (req, rsp) -> {
+	                	
+	                	String cid = req.params(":cid");
+	                	Pair<Boolean,Exception> result = postContractSign(req, rsp);
+	                	
+	                	if (result.getRight() != null || !result.getLeft()) {
+                	    	rsp.status(500);
+                	    	rsp.type("text/html");
+                    		return body().with(
+                				h3("Error signing!"),
+                    			div(result.getRight().getMessage())
+                    		).render();
+	                	}
+	                	
+	                	rsp.redirect("");
+	                	return null;
+	                });
 	                
 	                // query contract
 	                get("/:cid/query", (req, rsp) -> getQueryOperation(req, rsp));
@@ -246,9 +263,9 @@ public class API {
     	String cid = req.params(":cid");
     	
     	// delegate get contract to interpreter
-    	String contract = null;
+    	Contract contract = null;
 		try {
-			contract = ci.getContractRaw(channel, cid, extractClientCrt(req));
+			contract = ci.getContract(channel, cid, extractClientCrt(req));
 		} catch (Exception e) {
     		rsp.status(404);
     		rsp.type("text/html");
@@ -260,38 +277,18 @@ public class API {
     			)
     		).render();
 		}
-		
-		// check signature state of the contract
-    	ChaincodeResult crSignature = null;
-		try {
-			crSignature = ci.getContractSignature(channel, cid, extractClientCrt(req));
-		} catch (Exception e) {
-			// let it go
-		}
     	
 		
 		// produce an hash of the contract
     	String contractHash = null;
 		try {
 			MessageDigest md = MessageDigest.getInstance("SHA-256");
-			md.update(contract.getBytes());
+			md.update(contract.getRawRepresentation().getBytes());
 			contractHash = new String(Base64.getEncoder().encode(md.digest()));
 		} catch (NoSuchAlgorithmException e) {
 			e.printStackTrace();
 		}
     	
-    	// found. return json in pretty print
-    	String prettyprintResult = null;
-		try {
-			ObjectMapper mapper = new ObjectMapper();
-			mapper.configure(Feature.ALLOW_UNQUOTED_CONTROL_CHARS, true);
-			JsonNode resultObject = mapper.readTree(contract);
-			prettyprintResult = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(resultObject);
-		} catch (IOException e) {
-			e.printStackTrace();
-		}
-		
-
 
 		// return html
     	rsp.status(200);
@@ -301,15 +298,13 @@ public class API {
 		    div().with(
 		    	p("Below is all metadata related with the contract:")
 		    ),
-		    pre(prettyprintResult),
+		    pre(contract.getPrettyPrintRepresentation()),
 		    br(),
-		    crSignature == null? 
-		    		div("There was a problem while checking contract signatures... Can't check if it was signed already or not.") :
-		    		crSignature.getStatus() == ChaincodeResult.CHAINCODE_SUCCESS && !crSignature.getContent().isEmpty()?
-		    				div("SIGNED").withStyle("color:green") :
-	    					div("NOT SIGNED").withStyle("color:red"), 
+    		contract.getSignature() != null && !contract.getSignature().isEmpty()?
+    				div("SIGNED").withStyle("color:green") :
+					div("NOT SIGNED").withStyle("color:red"), 
 		    				
-		    crSignature != null && crSignature.getStatus() == ChaincodeResult.CHAINCODE_SUCCESS && !crSignature.getContent().isEmpty()? 
+			contract.getSignature() != null && !contract.getSignature().isEmpty()?
 		    		div("Contract is signed. Below is the SHA256 hash of the contract and your signature."):
 		    		div("Please sign the below SHA256 hash of the contract with your private key (using openssl or an utility), copy the signature to the field below (in base64 format) and press accept if you agree with the contract."),
 		    br(),
@@ -335,18 +330,18 @@ public class API {
 			    			"Paste your signature here."
 			    	)
 			    	.isRequired()
-			    	.withCondValue(crSignature != null && ChaincodeResult.CHAINCODE_SUCCESS == crSignature.getStatus() && !crSignature.getContent().isEmpty(), crSignature.getContent())
+			    	.withCondValue(contract.getSignature() != null && !contract.getSignature().isEmpty(), contract.getSignature())
 	    		),
 	    		div().with(
 		    		span().with(
 		    				
 		    			button("Accept & sign")
 		    			.withType("submit")
-		    			.withCondHidden(crSignature != null && ChaincodeResult.CHAINCODE_SUCCESS == crSignature.getStatus() && !crSignature.getContent().isEmpty()),
+		    			.withCondHidden(contract.getSignature() != null && !contract.getSignature().isEmpty()),
 		    			
 		    			button("Reject")
 		    			.withType("cancel")
-		    			.withCondHidden(crSignature != null && ChaincodeResult.CHAINCODE_SUCCESS == crSignature.getStatus() && !crSignature.getContent().isEmpty())
+		    			.withCondHidden(contract.getSignature() != null && !contract.getSignature().isEmpty())
 				    )
 	    		)
 	    	)
@@ -358,22 +353,23 @@ public class API {
 		return crtList[0];
 	}
 	
-	private static Pair<ChaincodeResult,Exception> postContractSign(Request req, Response rsp) throws UnsupportedEncodingException {
+	private static Pair<Boolean,Exception> postContractSign(Request req, Response rsp) throws UnsupportedEncodingException {
 		
 		Exception exc = null;
 		
 		String channel = req.params(":channel");
 		String cid = req.params(":cid");
     	String clientSig = req.queryParams("signature");
+    	boolean result = false;
 	
 		// get client crt first
     	try {
-			ci.signContract(channel, cid, extractClientCrt(req), clientSig);
+    		result = ci.signContract(channel, cid, extractClientCrt(req), clientSig);
 		} catch (Exception e) {
 			exc = e;
 		}
         	
-		return new Pair<ChaincodeResult,Exception>(null,exc);
+		return new Pair<Boolean,Exception>(result,exc);
 	}
 	
 	private static String getQueryOperation(Request req, Response rsp) {

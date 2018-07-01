@@ -5,13 +5,16 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.fasterxml.jackson.core.JsonParser.Feature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 public class Contract {
 	
-	
+	private String rawContract;
 	private Map<String,?> attributes;
 	private boolean isSection;
+	private String signature;
 	
 	public Contract(Map<String, ?> attributes) {
 		this.attributes = attributes;
@@ -19,11 +22,16 @@ public class Contract {
 	}
 	
 	@SuppressWarnings("unchecked")
-	public Contract(String rawJsonContract) {
+	public Contract(String rawJsonContract, String rawJsonSignature) {
 		// read json and put into an hashmap
+		ObjectMapper om = new ObjectMapper();
 		try {
-			attributes = new ObjectMapper().readValue(rawJsonContract, HashMap.class);
+			attributes = om.readValue(rawJsonContract, HashMap.class);
 			this.isSection = false;
+			if (rawJsonSignature != null && !rawJsonSignature.isEmpty()) {
+				this.signature = (String) om.readValue(rawJsonSignature, HashMap.class).get("signature");
+			}
+			this.rawContract = rawJsonContract;
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
@@ -59,6 +67,40 @@ public class Contract {
 	public List<String> getContractListAttr(String key) {
 		return (List<String>) attributes.get(key);
 	}
+	
+	public String getRawRepresentation() {
+		return rawContract;
+	}
+	
+	public void sign(String signature) {
+		this.signature = signature;
+	}
+	
+	
+	public String getSignature() {
+		return signature;
+	}
+	
+	public byte[] getSignatureBytes() {
+		return signature.getBytes();
+	}
+	
+	public String getPrettyPrintRepresentation() {
+		
+		String result = null;
+		ObjectMapper mapper = new ObjectMapper();
+		mapper.configure(Feature.ALLOW_UNQUOTED_CONTROL_CHARS, true);
+		try {
+			JsonNode resultObject = mapper.readTree(rawContract);
+			result = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(resultObject);
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		
+		return result;
+	}
+	
+	
 	
 	public boolean conformsToStandard() {
 		
