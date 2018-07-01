@@ -149,7 +149,8 @@ public class API {
 	                // get contract specification
 	                get("/:cid", (req, rsp) -> getContract(req, rsp));
 	                post("/:cid/sign", (req, rsp) -> {
-	                	
+
+	                	String channel = req.params(":channel");
 	                	String cid = req.params(":cid");
 	                	Pair<Boolean,Exception> result = postContractSign(req, rsp);
 	                	
@@ -162,7 +163,7 @@ public class API {
                     		).render();
 	                	}
 	                	
-	                	rsp.redirect("");
+	                	rsp.redirect("/api/" + channel + "/contract/" + cid);
 	                	return null;
 	                });
 	                
