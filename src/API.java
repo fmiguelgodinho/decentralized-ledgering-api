@@ -35,6 +35,9 @@ import org.apache.commons.configuration2.ex.ConfigurationException;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.hyperledger.fabric_ca.sdk.exception.InvalidArgumentException;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.protobuf.ByteString;
 import com.mongodb.MongoClient;
 import com.mongodb.MongoClientURI;
@@ -128,6 +131,7 @@ public class API {
     	);  
          
 
+//        ObjectMapper jsonMapper = new ObjectMapper();
         // setup routing		
         path("/api", () -> {
 //        	before((req, rsp) -> {
@@ -155,12 +159,25 @@ public class API {
 	                	Pair<Boolean,Exception> result = postContractSign(req, rsp);
 	                	
 	                	if (result.getRight() != null || !result.getLeft()) {
+
                 	    	rsp.status(500);
-                	    	rsp.type("text/html");
-                    		return body().with(
-                				h3("Error signing!"),
-                    			div(result.getRight().getMessage())
-                    		).render();
+//	                		if (shouldReturnHtml(req)) {
+	                			// return html
+	                	    	rsp.type("text/html");
+	                    		return body().with(
+	                				h3("Error signing!"),
+	                    			div(result.getRight().getMessage())
+	                    		).render();
+//	                		} else {
+//	                			// return json
+//	                	    	rsp.type("application/json");
+//	                			JsonNode root = jsonMapper.createObjectNode();
+//	                			((ObjectNode) root).put("status", 500);
+//	                			JsonNode root
+//	                			((ObjectNode) root).put("response", result.getRight().getMessage());
+//	                			return jsonMapper.writerWithDefaultPrettyPrinter().writeValueAsString(root);
+//	                		}
+
 	                	}
 	                	
 	                	rsp.redirect("/api/" + channel + "/contract/" + cid);
@@ -505,10 +522,10 @@ public class API {
     	return new Pair<ChaincodeResult,Exception>(result, exc);
 	}
 		
-//	private static boolean shouldReturnHtml(Request request) {
-//	    String accept = request.headers("Accept");
-//	    return accept != null && accept.contains("text/html");
-//	}
+	private static boolean shouldReturnHtml(Request request) {
+	    String accept = request.headers("Accept");
+	    return accept != null && accept.contains("text/html");
+	}
 
 
 }
