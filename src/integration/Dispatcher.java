@@ -4,9 +4,13 @@ import java.io.File;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
+import java.io.UnsupportedEncodingException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collection;
 import java.util.LinkedList;
 import java.util.List;
@@ -38,6 +42,8 @@ import org.hyperledger.fabric.sdk.security.CryptoSuite;
 import com.google.protobuf.ByteString;
 
 import core.dto.ChaincodeResult;
+import crypto.threshsig.GroupKey;
+import crypto.threshsig.SigShare;
 import util.NodeConnection;
 
 public class Dispatcher {
@@ -109,6 +115,8 @@ public class Dispatcher {
 				default:
 	    			throw new IllegalArgumentException("Unrecognized operation: " + op);
     		}
+		} catch (NoSuchAlgorithmException e) {
+			e.printStackTrace();
 		} finally {
 //			Thread.sleep(cfg.getLong("hlf.chaincode.callInterval"));
 		}
@@ -201,7 +209,7 @@ public class Dispatcher {
 //      
 //    }
 
-    private ChaincodeResult query(Channel channel, String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws ProposalException, InvalidArgumentException {
+    private ChaincodeResult query(Channel channel, String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws ProposalException, InvalidArgumentException, NoSuchAlgorithmException {
     	
 
     	Collection<ProposalResponse> successful = new LinkedList<ProposalResponse>();
@@ -223,13 +231,19 @@ public class Dispatcher {
         log.info("Sending query request, function '" + chaincodeFn + "' with arguments ['" + String.join("', '", chaincodeArgs) + "'], through chaincode '" + chaincodeId + "'...");
         
         // parse responses
+        List<SigShare> responseSigs = new ArrayList<SigShare>(responses.size());
+        byte[] responsePayload = null;
         String responseString = null;
         for (ProposalResponse rsp : responses) {
         	
-        	// if valid
+        	// if valid (OBS: ISVERIFIED IS BROKEN ON PURPOSE, IT WILL ALWAYS RETURN TRUE. VALIDATION WILL OCCUR DIRECTLY HERE)
         	if (rsp.isVerified() && rsp.getStatus() == ProposalResponse.Status.SUCCESS) {
+        		responsePayload = rsp.getProposalResponse().getPayload().toByteArray();
         		responseString = rsp.getProposalResponse().getResponse().getPayload().toStringUtf8();
         		successful.add(rsp);
+        		// collect sigs
+        		SigShare share = SigShare.fromBytes(rsp.getProposalResponse().getEndorsement().getSignature().toByteArray());
+        		responseSigs.add(share);
         	} else {
         		failed.add(rsp);
         	}
@@ -237,12 +251,42 @@ public class Dispatcher {
         
         log.info("Received " + responses.size() + " query proposal responses. Successful: " + successful.size() + " . Failed: " + failed.size());
 
-        // TODO: improve BFT?
         
         // if we obtain a majority of faults => exit error
         if (failed.size() >= successful.size()) {
         	throw new RuntimeException("Too many peers failed the response!");
         }
+
+        // TODO: remove thresh sig hardcoded verification
+        // get group key
+        GroupKey gk = GroupKey.fromString(cfg.getString("crypto.threshsig.groupKey"));
+        SigShare[] sigs = null; 
+        
+        // get only the threshold
+        if (responseSigs.size() == gk.getK()) {
+        	sigs = new SigShare[responseSigs.size()];
+        } else {
+        	// calculate excess and allocate only needed size
+        	int excess = Math.abs(gk.getK()-responseSigs.size());
+        	sigs = new SigShare[responseSigs.size() - excess];
+        	// remove excess
+        	for (int i = 0; i < excess; i++) {
+        		responseSigs.remove(i);
+        	}
+        }
+        // if lower than k, it will fail the sig verification
+        
+        // hash the msg
+        MessageDigest md = MessageDigest.getInstance("SHA-1");
+        byte[] digest = Base64.getUrlEncoder().encode(md.digest(responsePayload));
+        // verify
+        boolean verified = SigShare.verify(digest, responseSigs.toArray(sigs), gk.getK(), gk.getL(), gk.getModulus(), gk.getExponent());
+        
+        if (!verified) {
+        	throw new RuntimeException("Signature verification failure!");
+        }
+        
+        log.info("Signature verification is ok!");
         
         return new ChaincodeResult(ChaincodeResult.CHAINCODE_SUCCESS, responseString);
     }
