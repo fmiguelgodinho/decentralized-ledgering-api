@@ -1,11 +1,6 @@
 package integration;
 
 import java.io.File;
-import java.io.IOException;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
-import java.io.UnsupportedEncodingException;
-import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -98,6 +93,9 @@ public class Dispatcher {
     	
     	ChaincodeResult cr = new ChaincodeResult(ChaincodeResult.CHAINCODE_FAILURE);
     	
+    	// TODO remove this and create enum
+    	int sigVerificationMethod = 0;
+    	
     	try {
     		// set correct channel
     		Channel channel = changeChannel(channelName);
@@ -105,11 +103,11 @@ public class Dispatcher {
     		switch (op) {
     		
 	    		case CHAINCODE_QUERY_OPERATION:
-	    			cr = query(channel, chaincodeId, chaincodeFn, chaincodeArgs);
+	    			cr = query(channel, chaincodeId, chaincodeFn, chaincodeArgs, sigVerificationMethod);
 	    			break;
 	    			
 	    		case CHAINCODE_INVOKE_OPERATION:
-	    			cr = invoke(channel, chaincodeId, chaincodeFn, chaincodeArgs);
+	    			cr = invoke(channel, chaincodeId, chaincodeFn, chaincodeArgs, sigVerificationMethod);
 	    			break;
 	    			
 				default:
@@ -209,7 +207,7 @@ public class Dispatcher {
 //      
 //    }
 
-    private ChaincodeResult query(Channel channel, String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws ProposalException, InvalidArgumentException, NoSuchAlgorithmException {
+    private ChaincodeResult query(Channel channel, String chaincodeId, String chaincodeFn, String[] chaincodeArgs, int sigVerificationMethod) throws ProposalException, InvalidArgumentException, NoSuchAlgorithmException {
     	
 
     	Collection<ProposalResponse> successful = new LinkedList<ProposalResponse>();
@@ -258,31 +256,7 @@ public class Dispatcher {
         }
 
         // TODO: remove thresh sig hardcoded verification
-        // get group key
-        GroupKey gk = GroupKey.fromString(cfg.getString("crypto.threshsig.groupKey"));
-        SigShare[] sigs = null; 
-        
-        // get only the threshold
-        if (responseSigs.size() == gk.getK()) {
-        	sigs = new SigShare[responseSigs.size()];
-        } else {
-        	// calculate excess and allocate only needed size
-        	int excess = Math.abs(gk.getK()-responseSigs.size());
-        	sigs = new SigShare[responseSigs.size() - excess];
-        	// remove excess
-        	for (int i = 0; i < excess; i++) {
-        		responseSigs.remove(i);
-        	}
-        }
-        // if lower than k, it will fail the sig verification
-        
-        // hash the msg
-        MessageDigest md = MessageDigest.getInstance("SHA-1");
-        byte[] digest = Base64.getUrlEncoder().encode(md.digest(responsePayload));
-        // verify
-        boolean verified = SigShare.verify(digest, responseSigs.toArray(sigs), gk.getK(), gk.getL(), gk.getModulus(), gk.getExponent());
-        
-        if (!verified) {
+        if (!verifyThreshSig(responseSigs, responsePayload)) {
         	throw new RuntimeException("Signature verification failure!");
         }
         
@@ -291,7 +265,7 @@ public class Dispatcher {
         return new ChaincodeResult(ChaincodeResult.CHAINCODE_SUCCESS, responseString);
     }
     
-    private ChaincodeResult invoke(Channel channel, String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws ProposalException, InvalidArgumentException, InterruptedException, ExecutionException, TimeoutException {
+    private ChaincodeResult invoke(Channel channel, String chaincodeId, String chaincodeFn, String[] chaincodeArgs, int sigVerificationMethod) throws ProposalException, InvalidArgumentException, InterruptedException, ExecutionException, TimeoutException {
     	
 
     	Collection<ProposalResponse> successful = new LinkedList<ProposalResponse>();
@@ -312,20 +286,34 @@ public class Dispatcher {
         Collection<ProposalResponse> responses = channel.sendTransactionProposal(tpr, channel.getPeers());
         
         log.info("Sending transaction proposal, function '" + chaincodeFn + "' with arguments ['" + String.join("', '", chaincodeArgs) + "'], through chaincode '" + chaincodeId + "'...");
-        
-        // parse response
-        List<ByteString> signatures = new ArrayList<ByteString>();
+       
+        // parse responses
+        List<SigShare> responseSigs = new ArrayList<SigShare>(responses.size());
+        List<ByteString> signatureStrings = new ArrayList<ByteString>(responses.size());
+        byte[] responsePayload = null;
         for (ProposalResponse rsp : responses) {
         	// if valid
         	if (rsp.isVerified() && rsp.getStatus() == ProposalResponse.Status.SUCCESS) {
+        		responsePayload = rsp.getProposalResponse().getPayload().toByteArray();
+        		signatureStrings.add(rsp.getProposalResponse().getEndorsement().getSignature());
         		successful.add(rsp);
-        		signatures.add(rsp.getProposalResponse().getEndorsement().getSignature());
-        		// TODO, do something if it's a thresh signature, as it's just a single one
+        		
+        		// collect sigs
+        		SigShare share = SigShare.fromBytes(rsp.getProposalResponse().getEndorsement().getSignature().toByteArray());
+        		responseSigs.add(share);
         	} else {
         		failed.add(rsp);
         	}
         }
         log.info("Collecting endorsements and sending transaction...");
+        
+        // TODO: remove thresh sig hardcoded verification
+        if (!verifyThreshSig(responseSigs, responsePayload)) {
+        	throw new RuntimeException("Signature verification failure!");
+        }
+        
+        log.info("Signature verification is ok!");
+        
 
 
         // send transaction with endorsements
@@ -336,7 +324,7 @@ public class Dispatcher {
 
         log.info("Transaction sent.");
         
-        return new ChaincodeResult(ChaincodeResult.CHAINCODE_SUCCESS, te.getTimestamp(), signatures);
+        return new ChaincodeResult(ChaincodeResult.CHAINCODE_SUCCESS, te.getTimestamp(), signatureStrings);
     }
     
     private Channel initChannel(String channelName, NodeConnection[] nodesOnChannel) throws InvalidArgumentException, TransactionException {
@@ -406,42 +394,40 @@ public class Dispatcher {
         }
         return appUser;
     }
-
-
-    // user serialization and deserialization utility functions
-    // files are stored in the base directory
-
-    /**
-     * Serialize AppUser object to file
-     *
-     * @param appUser The object to be serialized
-     * @throws IOException
-     */
-    static void serialize(HLFUser appUser) throws IOException {
-        try (ObjectOutputStream oos = new ObjectOutputStream(Files.newOutputStream(
-                Paths.get(appUser.getName() + ".jso")))) {
-            oos.writeObject(appUser);
+    
+    /** crypto functions for verifying endorsements */
+    
+    private boolean verifyThreshSig(List<SigShare> sigShares, byte[] msgBytes) {
+    	
+        GroupKey gk = GroupKey.fromString(cfg.getString("crypto.threshsig.groupKey"));
+        SigShare[] sigs = null; 
+        
+        // get only the threshold
+        if (sigShares.size() == gk.getK()) {
+        	sigs = new SigShare[sigShares.size()];
+        } else {
+        	// calculate excess and allocate only needed size
+        	int excess = Math.abs(gk.getK()-sigShares.size());
+        	sigs = new SigShare[sigShares.size() - excess];
+        	// remove excess
+        	for (int i = 0; i < excess; i++) {
+        		sigShares.remove(i);
+        	}
         }
-    }
+        // if lower than k, it will fail the sig verification
+        
+        // hash the msg and pass it through b64 as the blockchain peers do
+		try {
+	        MessageDigest md = MessageDigest.getInstance("SHA-1");
+	        byte[] digest = Base64.getUrlEncoder().encode(md.digest(msgBytes));
+	        
+	        // verify
+	        return SigShare.verify(digest, sigShares.toArray(sigs), gk.getK(), gk.getL(), gk.getModulus(), gk.getExponent());
 
-    /**
-     * Deserialize AppUser object from file
-     *
-     * @param name The name of the user. Used to build file name ${name}.jso
-     * @return
-     * @throws Exception
-     */
-    static HLFUser tryDeserialize(String name) throws Exception {
-        if (Files.exists(Paths.get(name + ".jso"))) {
-            return deserialize(name);
-        }
-        return null;
-    }
-
-    static HLFUser deserialize(String name) throws Exception {
-        try (ObjectInputStream decoder = new ObjectInputStream(
-                Files.newInputStream(Paths.get(name + ".jso")))) {
-            return (HLFUser) decoder.readObject();
-        }
+		} catch (NoSuchAlgorithmException e) {
+			e.printStackTrace();
+		}
+		
+		return false;
     }
 }
