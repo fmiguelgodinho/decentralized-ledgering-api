@@ -203,7 +203,8 @@ public class ContractInterpreter {
 					channelName,
 					cid, 
 					function, 
-					args
+					args,
+					1
 			);
 		} catch (InterruptedException e) {
 			e.printStackTrace();
