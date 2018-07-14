@@ -513,7 +513,7 @@ public class API {
 	    	if (args.length == 0)
 	    		throw new InvalidArgumentException("No arguments were able to be parsed! Please validate your input!");
 	    	
-	    	result = ci.executeContractFunction(type, channel, cid, oid, extractClientCrt(req), args);
+	    	result = ci.verifyAndExecuteContract(type, channel, cid, oid, extractClientCrt(req), args);
 	    	
 		} catch (Exception e) {
 			exc = e;

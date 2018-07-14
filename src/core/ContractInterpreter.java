@@ -40,25 +40,7 @@ public class ContractInterpreter {
 		this.dpt = dpt;
 	}
 	
-	public void saveRawContractToDB(String channel, String cid, Contract contract) {
-		
-		final DBObject key = new BasicDBObject()
-				.append("channelId", channel)
-				.append("contractId", cid);
-		
-		// build obj being saved
-		final DBObject contractObj = new BasicDBObject()
-				.append("contract", contract.getRawRepresentation())
-				.append("signature", contract.getSignature());
-		
-		// save to db (upsert)
-		contractCollection.update(
-				new BasicDBObject().append("_id", key), 
-				contractObj, 
-				true, 
-				false
-		);
-	}
+	/*** LOAD AND SAVE CONTRACT METHODS ***/
 	
 	public Contract getContract(String channel, String cid, X509Certificate clientCrt) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
 		
@@ -70,69 +52,19 @@ public class ContractInterpreter {
 		// it wasn't in db! try to retrieve it from blockchain - slower
 		contract = loadContractFromBlockchain(channel, cid, clientCrt);
 		
+		if (!contract.conformsToStandard()) {
+			throw new RuntimeException("Contract does not conform to standard!");
+		}
+		
+		// fetch sig from the blockchain as well
+		setContractSignature(channel, cid,  contract, clientCrt);
+		
 		// save contract to db for future times
 		if (contract != null)
 			saveRawContractToDB(channel, cid, contract);
 		return contract;
 	}
-	
-	public boolean signContract(String channel, String cid, X509Certificate clientCrt, String signature) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
-		
-		// get again the contract the client "supposedly" signed
-    	Contract contract = getContract(channel, cid, clientCrt);
-    	
-    	// verify sig
-    	boolean isCorrectlySigned = false;
-    	try {
-        	// remove 64 enconding
-        	byte[] signatureBytes = Base64.getDecoder().decode(signature.getBytes("UTF-8"));
-    		isCorrectlySigned = verifySignature(contract, clientCrt, signatureBytes);
-    		
-    		if (isCorrectlySigned) {
-    			
-    			// call sign fn
-    			ChaincodeResult cr = executeContractFunction(
-					Dispatcher.CHAINCODE_INVOKE_OPERATION, 
-        			channel, 
-        			cid,
-        			"signContract", 
-        			clientCrt,
-        			new String[] {
-    					signature
-        			}
-    			);
-    			
-    			// save to db
-    			if (cr.getStatus() == ChaincodeResult.CHAINCODE_SUCCESS) {
-    				contract.sign(signature);
-    				saveRawContractToDB(channel, cid, contract);
-    			}
-    			return true;
-    		}
-    		
-		} catch (InvalidKeyException | NoSuchAlgorithmException | SignatureException | UnsupportedEncodingException e) {
-			e.printStackTrace();
-		}
-    	
 
-    	
-		return false;
-	}
-	
-	private boolean verifySignature(Contract contract, X509Certificate signerCrt, byte[] signature) throws NoSuchAlgorithmException, InvalidKeyException, SignatureException {
-		
-		// produce an hash of the contract
-		MessageDigest md = MessageDigest.getInstance("SHA-256");
-		md.update(contract.getRawRepresentation().getBytes());
-		byte[] contractHashBytes = Base64.getEncoder().encode(md.digest());
-		
-    	Signature sig = Signature.getInstance(signerCrt.getSigAlgName());
-		sig.initVerify(signerCrt.getPublicKey());
-		
-    	sig.update(contractHashBytes, 0, contractHashBytes.length);
-    	return sig.verify(signature);
-	}
-	
 	private Contract loadContractFromDb(String channel, String cid) {
 		
 		// recreate key
@@ -164,33 +96,183 @@ public class ContractInterpreter {
 	private Contract loadContractFromBlockchain(String channel, String cid, X509Certificate clientCrt) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
 		
     	// query the chaincode
-    	ChaincodeResult cr1 = executeContractFunction(
+    	ChaincodeResult cr = executeContract(
 			Dispatcher.CHAINCODE_QUERY_OPERATION, 
 			channel,
 			cid, 
 			"getContractDefinition", 
 			clientCrt,
-			new String[] {}								// empty args
+			new String[] {},								// empty args
+			-1												// here we don't know what sig verif to use yet
 		);
     	
-    	ChaincodeResult cr2 = executeContractFunction(
-			Dispatcher.CHAINCODE_QUERY_OPERATION, 
-			channel,
-			cid,
-			"getContractSignature", 
-			clientCrt,
-			new String[] {}								// empty args
-		);
-    	
-    	if (cr1.getStatus() == ChaincodeResult.CHAINCODE_SUCCESS && cr2.getStatus() == ChaincodeResult.CHAINCODE_SUCCESS) {
-    		return new Contract(cr1.getContent(), cr2.getContent());
+    	if (cr.getStatus() == ChaincodeResult.CHAINCODE_SUCCESS) {
+    		return new Contract(cr.getContent(), null);
     	}
     	
     	// shouldn't get here
     	return null;
 	}
 	
-	public ChaincodeResult executeContractFunction(int op, String channelName, String cid, String function, X509Certificate clientCrt, String[] args) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
+	private void saveRawContractToDB(String channel, String cid, Contract contract) {
+		
+		final DBObject key = new BasicDBObject()
+				.append("channelId", channel)
+				.append("contractId", cid);
+		
+		// build obj being saved
+		final DBObject contractObj = new BasicDBObject()
+				.append("contract", contract.getRawRepresentation())
+				.append("signature", contract.getSignature());
+		
+		// save to db (upsert)
+		contractCollection.update(
+				new BasicDBObject().append("_id", key), 
+				contractObj, 
+				true, 
+				false
+		);
+	}
+	
+	private void setContractSignature(String channel, String cid, Contract cc, X509Certificate clientCrt) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
+
+		// fetch client signature from contract
+    	ChaincodeResult cr = verifyAndExecuteContract(
+			Dispatcher.CHAINCODE_QUERY_OPERATION, 
+			channel,
+			cid,
+			cc,
+			"getContractSignature", 
+			clientCrt,
+			new String[] {}								// empty args
+		);
+    	
+    	if (cr.getStatus() == ChaincodeResult.CHAINCODE_SUCCESS) {
+    		cc.setSignature(cr.getContent());
+    	}
+	}
+	
+	
+	
+	
+
+	/*** CLIENT SIGNING CONTRACT METHODS ***/
+	/**
+	 * Method for a client to sign a contract and start using it.
+	 */
+	public boolean signContract(String channel, String cid, X509Certificate clientCrt, String signature) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
+		
+		// get again the contract the client "supposedly" signed
+    	Contract contract = getContract(channel, cid, clientCrt);
+    	
+    	// verify sig
+    	boolean isCorrectlySigned = false;
+    	try {
+        	// remove 64 enconding
+        	byte[] signatureBytes = Base64.getDecoder().decode(signature.getBytes("UTF-8"));
+    		isCorrectlySigned = verifyClientSignature(contract, clientCrt, signatureBytes);
+    		
+    		if (isCorrectlySigned) {
+    			
+    			// call sign fn
+    			ChaincodeResult cr = verifyAndExecuteContract(
+					Dispatcher.CHAINCODE_INVOKE_OPERATION, 
+        			channel, 
+        			cid,
+        			"signContract", 
+        			clientCrt,
+        			new String[] {
+    					signature
+        			}
+    			);
+    			
+    			// save to db
+    			if (cr.getStatus() == ChaincodeResult.CHAINCODE_SUCCESS) {
+    				contract.sign(signature);
+    				saveRawContractToDB(channel, cid, contract);
+    			}
+    			return true;
+    		}
+    		
+		} catch (InvalidKeyException | NoSuchAlgorithmException | SignatureException | UnsupportedEncodingException e) {
+			e.printStackTrace();
+		}
+    	
+
+    	
+		return false;
+	}
+	
+	private boolean verifyClientSignature(Contract contract, X509Certificate signerCrt, byte[] signature) throws NoSuchAlgorithmException, InvalidKeyException, SignatureException {
+		
+		// produce an hash of the contract
+		MessageDigest md = MessageDigest.getInstance("SHA-256");
+		md.update(contract.getRawRepresentation().getBytes());
+		byte[] contractHashBytes = Base64.getEncoder().encode(md.digest());
+		
+    	Signature sig = Signature.getInstance(signerCrt.getSigAlgName());
+		sig.initVerify(signerCrt.getPublicKey());
+		
+    	sig.update(contractHashBytes, 0, contractHashBytes.length);
+    	return sig.verify(signature);
+	}
+	
+	
+
+
+	/*** CONTRACT EXECUTION METHODS ***/
+	
+	/**
+	 * Main method to execute a contract function. It verifies the contract specification beforehand
+	 * To be called when contract object is not available
+	 */
+	public ChaincodeResult verifyAndExecuteContract(int op, String channelName, String cid, String function, X509Certificate clientCrt, String[] args) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
+		
+		Contract cc = getContract(channelName, cid, clientCrt);
+		
+		// check if contract conforms to standard
+		if (cc.conformsToStandard()) {
+			// set signature type
+			String sigMethodSpec = cc.getExtendedContractProperties().getContractStringAttr("signature-type");
+			int sigMethod = -1;
+			if (sigMethodSpec.equals("multisig")) {
+				sigMethod = 0;
+			} else if (sigMethodSpec.equals("threshsig")) {
+				sigMethod = 1;
+			}
+			
+			return executeContract(op, channelName, cid, function, clientCrt, args, sigMethod);
+		}
+		return null;
+	}
+	
+	/**
+	 * Main method to execute a contract function. It verifies the contract specification beforehand
+	 * To be called when contract object is available
+	 */
+	public ChaincodeResult verifyAndExecuteContract(int op, String channelName, String cid, Contract cc, String function, X509Certificate clientCrt, String[] args) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
+		
+		// check if contract conforms to standard
+		if (cc.conformsToStandard()) {
+			// set signature type
+			String sigMethodSpec = cc.getExtendedContractProperties().getContractStringAttr("signature-type");
+			int sigMethod = -1;
+			if (sigMethodSpec.equals("multisig")) {
+				sigMethod = 0;
+			} else if (sigMethodSpec.equals("threshsig")) {
+				sigMethod = 1;
+			}
+			
+			return executeContract(op, channelName, cid, function, clientCrt, args, sigMethod);
+		}
+		return null;
+	}
+	
+	/**
+	 * Final contract execution method. After contract spec has been verified
+	 */
+	private ChaincodeResult executeContract(int op, String channelName, String cid, String function, X509Certificate clientCrt, String[] args, int sigVerificationMethod) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
+		
 		try {
 
 			byte[] pubKey = Base64.getEncoder().encode(clientCrt.getPublicKey().getEncoded());
@@ -204,7 +286,7 @@ public class ContractInterpreter {
 					cid, 
 					function, 
 					args,
-					1
+					sigVerificationMethod
 			);
 		} catch (InterruptedException e) {
 			e.printStackTrace();

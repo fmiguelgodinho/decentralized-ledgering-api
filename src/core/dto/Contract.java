@@ -32,12 +32,23 @@ public class Contract {
 		try {
 			attributes = om.readValue(rawJsonContract, HashMap.class);
 			this.isSection = false;
-			if (rawJsonSignature != null && !rawJsonSignature.isEmpty()) {
-				this.signature = (String) om.readValue(rawJsonSignature, HashMap.class).get("signature");
-			}
 			this.rawContract = rawJsonContract;
 		} catch (IOException e) {
 			e.printStackTrace();
+		}
+		
+		// set signature
+		setSignature(rawJsonSignature);
+	}
+	
+	public void setSignature(String rawJsonSignature) {
+		if (rawJsonSignature != null && !rawJsonSignature.isEmpty()) {
+			ObjectMapper om = new ObjectMapper();
+			try {
+				this.signature = (String) om.readValue(rawJsonSignature, HashMap.class).get("signature");
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
 		}
 	}
 	

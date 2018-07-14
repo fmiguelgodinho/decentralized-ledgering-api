@@ -42,9 +42,8 @@ public class Dispatcher {
 	
 	public static final int CHAINCODE_QUERY_OPERATION = 0;
 	public static final int CHAINCODE_INVOKE_OPERATION = 1;
-
-	public static final int SIG_VERIFICATION_MULTISIG = 0;
-	public static final int SIG_VERIFICATION_THRESHSIG = 0;
+	
+	public static final String GETCONTRACT_PHASE_CALL = "getContractDefinition";
 	
 	
     private static final Logger log = Logger.getLogger(Dispatcher.class);
@@ -78,6 +77,8 @@ public class Dispatcher {
         client = getHfClient();
         // set user context
         client.setUserContext(appUser);
+        // set threshsig group key for when needed
+        client.getCryptoSuite().setThreshSigGroupKey(cfg.getString("crypto.threshsig.groupKey").getBytes());
 
         // init channel map
         channels = new ConcurrentHashMap<String,Channel>();
@@ -92,24 +93,27 @@ public class Dispatcher {
     	
     	ChaincodeResult cr = new ChaincodeResult(ChaincodeResult.CHAINCODE_FAILURE);
     	
-    	client.getCryptoSuite().switchSignatureMethod(sigVerificationMethod);
-    	if (client.getCryptoSuite().isThreshSigEnabled()) {
-    		// set the group key
-    		client.getCryptoSuite().setThreshSigGroupKey(cfg.getString("crypto.threshsig.groupKey").getBytes());
+		// set correct channel
+		Channel channel = changeChannel(channelName);
+    	
+    	if (chaincodeFn.equals(GETCONTRACT_PHASE_CALL)) {
+    		// if it's the first time we're seeing the contract, we've got to signal the SDK to interpret the signature method
+    		channel.signalGetContractCall();
+    	} else {
+    		// else, we already know what to do. use the known verification method
+    		client.getCryptoSuite().switchSignatureMethod(sigVerificationMethod);
     	}
     	
     	try {
-    		// set correct channel
-    		Channel channel = changeChannel(channelName);
     		// call corresponding chaincode operation
     		switch (op) {
     		
 	    		case CHAINCODE_QUERY_OPERATION:
-	    			cr = query(channel, chaincodeId, chaincodeFn, chaincodeArgs, sigVerificationMethod);
+	    			cr = query(channel, chaincodeId, chaincodeFn, chaincodeArgs);
 	    			break;
 	    			
 	    		case CHAINCODE_INVOKE_OPERATION:
-	    			cr = invoke(channel, chaincodeId, chaincodeFn, chaincodeArgs, sigVerificationMethod);
+	    			cr = invoke(channel, chaincodeId, chaincodeFn, chaincodeArgs);
 	    			break;
 	    			
 				default:
@@ -209,7 +213,7 @@ public class Dispatcher {
 //      
 //    }
 
-    private ChaincodeResult query(Channel channel, String chaincodeId, String chaincodeFn, String[] chaincodeArgs, int sigVerificationMethod) throws ProposalException, InvalidArgumentException, NoSuchAlgorithmException {
+    private ChaincodeResult query(Channel channel, String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws ProposalException, InvalidArgumentException, NoSuchAlgorithmException {
     	
 
     	Collection<ProposalResponse> successful = new LinkedList<ProposalResponse>();
@@ -233,7 +237,6 @@ public class Dispatcher {
         // parse responses
         String responseString = null;
         for (ProposalResponse rsp : responses) {
-        	
         	// if valid (OBS: ISVERIFIED IS BROKEN ON PURPOSE, IT WILL ALWAYS RETURN TRUE. VALIDATION WILL OCCUR DIRECTLY HERE)
         	if (rsp.isVerified() && rsp.getStatus() == ProposalResponse.Status.SUCCESS) {
         		responseString = rsp.getProposalResponse().getResponse().getPayload().toStringUtf8();
@@ -255,7 +258,7 @@ public class Dispatcher {
         return new ChaincodeResult(ChaincodeResult.CHAINCODE_SUCCESS, responseString);
     }
     
-    private ChaincodeResult invoke(Channel channel, String chaincodeId, String chaincodeFn, String[] chaincodeArgs, int sigVerificationMethod) throws ProposalException, InvalidArgumentException, InterruptedException, ExecutionException, TimeoutException {
+    private ChaincodeResult invoke(Channel channel, String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws ProposalException, InvalidArgumentException, InterruptedException, ExecutionException, TimeoutException {
     	
 
     	Collection<ProposalResponse> successful = new LinkedList<ProposalResponse>();
