@@ -56,13 +56,6 @@ public class Dispatcher {
     	
     	this.cfg = cfg;
     	
-//      // create fabric-ca client
-//      HFCAClient caClient = getHfCaClient("http://localhost:7054", null);
-//
-// 		// enroll or load admin
-//      AppUser admin = getAdmin(caClient);
-//      log.info(admin);
-
         // register and enroll new user
         HLFUser appUser = getUser(
     		cfg.getString("hlf.client.crtPath"), 
