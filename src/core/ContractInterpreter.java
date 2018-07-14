@@ -7,7 +7,12 @@ import java.security.NoSuchAlgorithmException;
 import java.security.Signature;
 import java.security.SignatureException;
 import java.security.cert.X509Certificate;
+import java.text.DateFormat;
+import java.text.Format;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
 import java.util.Base64;
+import java.util.Date;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 
@@ -25,6 +30,8 @@ import com.mongodb.MongoClient;
 
 import core.dto.ChaincodeResult;
 import core.dto.Contract;
+import core.exception.InvalidContractPropertyException;
+import core.exception.NonConformantContractException;
 import integration.Dispatcher;
 
 public class ContractInterpreter {
@@ -42,7 +49,7 @@ public class ContractInterpreter {
 	
 	/*** LOAD AND SAVE CONTRACT METHODS ***/
 	
-	public Contract getContract(String channel, String cid, X509Certificate clientCrt) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
+	public Contract getContract(String channel, String cid, X509Certificate clientCrt) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException, NonConformantContractException, InvalidContractPropertyException {
 		
 		// try to first load it from db - quicker
 		Contract contract = loadContractFromDb(channel, cid);
@@ -53,7 +60,7 @@ public class ContractInterpreter {
 		contract = loadContractFromBlockchain(channel, cid, clientCrt);
 		
 		if (!contract.conformsToStandard()) {
-			throw new RuntimeException("Contract does not conform to standard!");
+			throw new NonConformantContractException("Contract does not conform to standard!");
 		}
 		
 		// fetch sig from the blockchain as well
@@ -134,7 +141,7 @@ public class ContractInterpreter {
 		);
 	}
 	
-	private void setContractSignature(String channel, String cid, Contract cc, X509Certificate clientCrt) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
+	private void setContractSignature(String channel, String cid, Contract cc, X509Certificate clientCrt) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException, InvalidContractPropertyException {
 
 		// fetch client signature from contract
     	ChaincodeResult cr = verifyAndExecuteContract(
@@ -160,7 +167,7 @@ public class ContractInterpreter {
 	/**
 	 * Method for a client to sign a contract and start using it.
 	 */
-	public boolean signContract(String channel, String cid, X509Certificate clientCrt, String signature) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
+	public boolean signContract(String channel, String cid, X509Certificate clientCrt, String signature) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException, NonConformantContractException, InvalidContractPropertyException {
 		
 		// get again the contract the client "supposedly" signed
     	Contract contract = getContract(channel, cid, clientCrt);
@@ -168,7 +175,7 @@ public class ContractInterpreter {
     	// verify sig
     	boolean isCorrectlySigned = false;
     	try {
-        	// remove 64 enconding
+        	// remove 64 encoding
         	byte[] signatureBytes = Base64.getDecoder().decode(signature.getBytes("UTF-8"));
     		isCorrectlySigned = verifyClientSignature(contract, clientCrt, signatureBytes);
     		
@@ -226,7 +233,7 @@ public class ContractInterpreter {
 	 * Main method to execute a contract function. It verifies the contract specification beforehand
 	 * To be called when contract object is not available
 	 */
-	public ChaincodeResult verifyAndExecuteContract(int op, String channelName, String cid, String function, X509Certificate clientCrt, String[] args) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
+	public ChaincodeResult verifyAndExecuteContract(int op, String channelName, String cid, String function, X509Certificate clientCrt, String[] args) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException, NonConformantContractException, InvalidContractPropertyException {
 		
 		Contract cc = getContract(channelName, cid, clientCrt);
 		
@@ -250,18 +257,39 @@ public class ContractInterpreter {
 	 * Main method to execute a contract function. It verifies the contract specification beforehand
 	 * To be called when contract object is available
 	 */
-	public ChaincodeResult verifyAndExecuteContract(int op, String channelName, String cid, Contract cc, String function, X509Certificate clientCrt, String[] args) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
+	public ChaincodeResult verifyAndExecuteContract(int op, String channelName, String cid, Contract cc, String function, X509Certificate clientCrt, String[] args) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException, InvalidContractPropertyException {
 		
 		// check if contract conforms to standard
 		if (cc.conformsToStandard()) {
+			
+			Contract extProps = cc.getExtendedContractProperties();
+			
+			
+			// check contract validity
+			try {
+				String expireSpec = extProps.getContractStringAttr("expires-on").replace("T", " ");
+				Format formatter = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+				Date expiresOn = (Date) formatter.parseObject(expireSpec);
+				
+				if (new Date().compareTo(expiresOn) >= 0) {
+					throw new InvalidContractPropertyException("Contract has expired");
+				}
+			} catch (ParseException e) {
+				e.printStackTrace();
+			}
+			
 			// set signature type
-			String sigMethodSpec = cc.getExtendedContractProperties().getContractStringAttr("signature-type");
+			String sigMethodSpec = extProps.getContractStringAttr("signature-type");
 			int sigMethod = -1;
 			if (sigMethodSpec.equals("multisig")) {
 				sigMethod = 0;
 			} else if (sigMethodSpec.equals("threshsig")) {
 				sigMethod = 1;
+			} else {
+				throw new InvalidContractPropertyException("Unknown signature type on contract (known are 'multisig' and 'threshsig')");
 			}
+			
+			
 			
 			return executeContract(op, channelName, cid, function, clientCrt, args, sigMethod);
 		}
