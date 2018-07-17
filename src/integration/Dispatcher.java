@@ -43,8 +43,6 @@ public class Dispatcher {
 	public static final int CHAINCODE_QUERY_OPERATION = 0;
 	public static final int CHAINCODE_INVOKE_OPERATION = 1;
 	
-	public static final String GETCONTRACT_PHASE_CALL = "getContractDefinition";
-	
 	
     private static final Logger log = Logger.getLogger(Dispatcher.class);
     
@@ -82,20 +80,12 @@ public class Dispatcher {
     }
     
     // use HLFJavaClient.CHAINCODE_QUERY_OPERATION or HLFJavaClient.CHAINCODE_INVOKE_OPERATION
-    public ChaincodeResult callChaincodeFunction(int op, String channelName, String chaincodeId, String chaincodeFn, String[] chaincodeArgs, int sigVerificationMethod) throws InterruptedException, ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
+    public ChaincodeResult callChaincodeFunction(int op, String channelName, String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws InterruptedException, ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
     	
     	ChaincodeResult cr = new ChaincodeResult(ChaincodeResult.CHAINCODE_FAILURE);
     	
 		// set correct channel
 		Channel channel = changeChannel(channelName);
-    	
-    	if (chaincodeFn.equals(GETCONTRACT_PHASE_CALL)) {
-    		// if it's the first time we're seeing the contract, we've got to signal the SDK to interpret the signature method
-    		channel.signalGetContractCall();
-    	} else {
-    		// else, we already know what to do. use the known verification method
-    		client.getCryptoSuite().switchSignatureMethod(sigVerificationMethod);
-    	}
     	
     	try {
     		// call corresponding chaincode operation

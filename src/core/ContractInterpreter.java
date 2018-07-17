@@ -7,12 +7,13 @@ import java.security.NoSuchAlgorithmException;
 import java.security.Signature;
 import java.security.SignatureException;
 import java.security.cert.X509Certificate;
-import java.text.DateFormat;
 import java.text.Format;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.Date;
+import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 
@@ -36,6 +37,8 @@ import integration.Dispatcher;
 
 public class ContractInterpreter {
 		
+	
+	public static final List<String> CONTRACT_SIGNATURE_TYPES = Arrays.asList(new String[] {"multisig", "threshsig"});
 	
 	// TODO: update contracts in db if updated in bc?
 	private DBCollection contractCollection;
@@ -109,8 +112,7 @@ public class ContractInterpreter {
 			cid, 
 			"getContractDefinition", 
 			clientCrt,
-			new String[] {},								// empty args
-			-1												// here we don't know what sig verif to use yet
+			new String[] {}								// empty args
 		);
     	
     	if (cr.getStatus() == ChaincodeResult.CHAINCODE_SUCCESS) {
@@ -234,23 +236,9 @@ public class ContractInterpreter {
 	 * To be called when contract object is not available
 	 */
 	public ChaincodeResult verifyAndExecuteContract(int op, String channelName, String cid, String function, X509Certificate clientCrt, String[] args) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException, NonConformantContractException, InvalidContractPropertyException {
-		
+		// get the contract and then verify and execute the function
 		Contract cc = getContract(channelName, cid, clientCrt);
-		
-		// check if contract conforms to standard
-		if (cc.conformsToStandard()) {
-			// set signature type
-			String sigMethodSpec = cc.getExtendedContractProperties().getContractStringAttr("signature-type");
-			int sigMethod = -1;
-			if (sigMethodSpec.equals("multisig")) {
-				sigMethod = 0;
-			} else if (sigMethodSpec.equals("threshsig")) {
-				sigMethod = 1;
-			}
-			
-			return executeContract(op, channelName, cid, function, clientCrt, args, sigMethod);
-		}
-		return null;
+		return verifyAndExecuteContract(op, channelName, cid, cc, function, clientCrt, args);
 	}
 	
 	/**
@@ -278,20 +266,22 @@ public class ContractInterpreter {
 				e.printStackTrace();
 			}
 			
-			// set signature type
+			// check signature type
 			String sigMethodSpec = extProps.getContractStringAttr("signature-type");
-			int sigMethod = -1;
-			if (sigMethodSpec.equals("multisig")) {
-				sigMethod = 0;
-			} else if (sigMethodSpec.equals("threshsig")) {
-				sigMethod = 1;
-			} else {
+			if (sigMethodSpec == null || sigMethodSpec.isEmpty()) {
+				// NOTE: redundant and possibly non-reachable. it's here for completeness.
+				// signature will fail in the HLF's ESCC before we get here
+				throw new InvalidContractPropertyException("No signature type on contract");
+			}
+			if (!CONTRACT_SIGNATURE_TYPES.contains(sigMethodSpec.trim())) {
+				// NOTE: redundant and possibly non-reachable. it's here for completeness.
+				// signature verification will fail in the SDK before we get here
 				throw new InvalidContractPropertyException("Unknown signature type on contract (known are 'multisig' and 'threshsig')");
 			}
 			
+			// TODO check if function exists and has the correct args supplied to it
 			
-			
-			return executeContract(op, channelName, cid, function, clientCrt, args, sigMethod);
+			return executeContract(op, channelName, cid, function, clientCrt, args);
 		}
 		return null;
 	}
@@ -299,7 +289,7 @@ public class ContractInterpreter {
 	/**
 	 * Final contract execution method. After contract spec has been verified
 	 */
-	private ChaincodeResult executeContract(int op, String channelName, String cid, String function, X509Certificate clientCrt, String[] args, int sigVerificationMethod) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
+	private ChaincodeResult executeContract(int op, String channelName, String cid, String function, X509Certificate clientCrt, String[] args) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
 		
 		try {
 
@@ -313,8 +303,7 @@ public class ContractInterpreter {
 					channelName,
 					cid, 
 					function, 
-					args,
-					sigVerificationMethod
+					args
 			);
 		} catch (InterruptedException e) {
 			e.printStackTrace();

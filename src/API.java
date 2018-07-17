@@ -163,7 +163,7 @@ public class API {
 	                	    	rsp.type("text/html");
 	                    		return body().with(
 	                				h3("Error signing!"),
-	                    			div(result.getRight().getMessage())
+	                    			div(result.getRight().getMessage()) // TODO: messages aren't descriptive. some exceptions just reutrn null pointer
 	                    		).render();
 //	                		} else {
 //	                			// return json
