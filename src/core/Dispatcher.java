@@ -1,4 +1,4 @@
-package integration;
+package core;
 
 import java.io.File;
 import java.nio.file.Paths;
@@ -35,6 +35,7 @@ import org.hyperledger.fabric.sdk.security.CryptoSuite;
 import com.google.protobuf.ByteString;
 
 import core.dto.ChaincodeResult;
+import core.dto.HLFUser;
 import util.NodeConnection;
 
 public class Dispatcher {

@@ -10,12 +10,6 @@ import static j2html.TagCreator.p;
 import static j2html.TagCreator.pre;
 import static j2html.TagCreator.span;
 import static j2html.TagCreator.textarea;
-import static spark.Spark.get;
-import static spark.Spark.path;
-import static spark.Spark.port;
-import static spark.Spark.post;
-import static spark.Spark.secure;
-import static spark.Spark.threadPool;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -40,9 +34,9 @@ import com.mongodb.MongoClient;
 import com.mongodb.MongoClientURI;
 
 import core.ContractInterpreter;
+import core.Dispatcher;
 import core.dto.ChaincodeResult;
 import core.dto.Contract;
-import integration.Dispatcher;
 import spark.Request;
 import spark.Response;
 import util.NodeConnection;
@@ -128,18 +122,8 @@ public class API {
     	);  
          
 
-//        ObjectMapper jsonMapper = new ObjectMapper();
         // setup routing		
         path("/api", () -> {
-//        	before((req, rsp) -> {
-//        	    boolean authenticated;
-//        	    // ... check if authenticated
-//        	    if (!authenticated) {
-//        	        halt(401, "You are not welcome here");
-//        	    }
-//        		// log something
-//        		log....
-//        	});
         	
         	get("/", (request, response) -> "Blockchain-supported Ledgering API for Decentralized Applications - v1.0");
 
