@@ -108,8 +108,8 @@ public class API {
 		while (true) {
 			
 			// get datagram msg for connection handshake
-			byte[] requestBuffer = new byte[mtu];
-			DatagramPacket request = new DatagramPacket(requestBuffer, requestBuffer.length);
+			byte[] recvBuffer = new byte[mtu];
+			DatagramPacket request = new DatagramPacket(recvBuffer, recvBuffer.length);
 			socket.receive(request);
 			
 			// TODO: Create a thread here
@@ -131,13 +131,14 @@ public class API {
 						respEnv = invokeOperation(recvEnv, null);
 						break;
 				}
-				byte[] responseBuffer = null;
+				
+				// create rsp buffer
+				byte[] respBuffer = Envelope.toBytes(respEnv);
 				
 				// respond to client
 				InetAddress clientAddress = request.getAddress();
 				int clientPort = request.getPort();
-		 
-	            DatagramPacket response = new DatagramPacket(responseBuffer, responseBuffer.length, clientAddress, clientPort);
+	            DatagramPacket response = new DatagramPacket(respBuffer, respBuffer.length, clientAddress, clientPort);
 	            socket.send(response);
 			
 			} catch (SocketTimeoutException e) {

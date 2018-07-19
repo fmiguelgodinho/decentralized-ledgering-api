@@ -21,6 +21,10 @@ public class Envelope {
 	private String function;
 	private byte[] payload;
 	
+	public Envelope(short operation, String channelId, String contractId) {
+		this(operation, channelId, contractId, null, null);
+	}
+	
 	public Envelope(short operation, String channelId, String contractId, byte[] payload) {
 		this(operation, channelId, contractId, null, payload);
 	}
@@ -126,8 +130,8 @@ public class Envelope {
 		// allocate according to env parameters
 		ByteBuffer buf = ByteBuffer.allocate(
 				Short.BYTES + Integer.BYTES + channelId.length + Integer.BYTES + contractId.length
-				+ (function != null? Integer.BYTES + function.length: 0)
-				+ (payload != null? Integer.BYTES + payload.length: 0)
+				+ (function != null? Integer.BYTES + function.length : Integer.BYTES)
+				+ (payload != null? Integer.BYTES + payload.length : Integer.BYTES)
 		);
 		
 		// put into the buffer
