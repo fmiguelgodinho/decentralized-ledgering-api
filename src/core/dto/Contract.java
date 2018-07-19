@@ -100,20 +100,20 @@ public class Contract {
 		return signature.getBytes();
 	}
 	
-	public String getPrettyPrintRepresentation() {
-		
-		String result = null;
-		ObjectMapper mapper = new ObjectMapper();
-		mapper.configure(Feature.ALLOW_UNQUOTED_CONTROL_CHARS, true);
-		try {
-			JsonNode resultObject = mapper.readTree(rawContract);
-			result = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(resultObject);
-		} catch (IOException e) {
-			e.printStackTrace();
-		}
-		
-		return result;
-	}
+//	public String getPrettyPrintRepresentation() {
+//		
+//		String result = null;
+//		ObjectMapper mapper = new ObjectMapper();
+//		mapper.configure(Feature.ALLOW_UNQUOTED_CONTROL_CHARS, true);
+//		try {
+//			JsonNode resultObject = mapper.readTree(rawContract);
+//			result = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(resultObject);
+//		} catch (IOException e) {
+//			e.printStackTrace();
+//		}
+//		
+//		return result;
+//	}
 	
 	
 	

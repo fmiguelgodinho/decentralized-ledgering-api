@@ -1,25 +1,17 @@
-import static j2html.TagCreator.body;
-import static j2html.TagCreator.br;
-import static j2html.TagCreator.button;
-import static j2html.TagCreator.div;
-import static j2html.TagCreator.each;
-import static j2html.TagCreator.form;
-import static j2html.TagCreator.h3;
-import static j2html.TagCreator.input;
-import static j2html.TagCreator.p;
-import static j2html.TagCreator.pre;
-import static j2html.TagCreator.span;
-import static j2html.TagCreator.textarea;
-
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.io.UnsupportedEncodingException;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
+import java.net.SocketTimeoutException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.security.NoSuchProviderException;
 import java.security.Security;
 import java.security.cert.X509Certificate;
-import java.util.ArrayList;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
 import java.util.Base64;
 import java.util.List;
 
@@ -27,9 +19,12 @@ import org.apache.commons.configuration2.Configuration;
 import org.apache.commons.configuration2.builder.fluent.Configurations;
 import org.apache.commons.configuration2.ex.ConfigurationException;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
-import org.hyperledger.fabric_ca.sdk.exception.InvalidArgumentException;
 
-import com.google.protobuf.ByteString;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.mongodb.MongoClient;
 import com.mongodb.MongoClientURI;
 
@@ -37,10 +32,9 @@ import core.ContractInterpreter;
 import core.Dispatcher;
 import core.dto.ChaincodeResult;
 import core.dto.Contract;
-import spark.Request;
-import spark.Response;
+import server.ApiTLSServer;
+import server.Envelope;
 import util.NodeConnection;
-import util.Pair;
 
 public class API {
 	
@@ -69,8 +63,8 @@ public class API {
 		// start internal modules of the API
 		startInternalModules();
 		
-		// start the REST service itself
-		startRESTServer();
+		// start the service itself
+		startDTLSServer();
 	}
 	
 	private static void setUpConfigurations() throws FileNotFoundException, IOException, ConfigurationException {
@@ -103,409 +97,214 @@ public class API {
 		ci = new ContractInterpreter(cfg, dbClient, dpt);
 	}
 	
-	private static void startRESTServer() {
-		// set port, https and threadpool config
-        port(
-        	cfg.getInt("api.port")
-    	);
-        threadPool(
-    		cfg.getInt("api.threadPool.max"), 
-    		cfg.getInt("api.threadPool.min"), 
-    		cfg.getInt("api.threadPool.timeout")
-        );
-        secure(
-    		cfg.getString("api.ssl.keystorePath"), 
-    		cfg.getString("api.ssl.keystorePw"), 
-    		cfg.getString("api.ssl.truststorePath"),
-    		cfg.getString("api.ssl.truststorePw"),
-    		cfg.getBoolean("api.ssl.muthualAuth")
-    	);  
-         
+	private static void startDTLSServer() throws IOException, NoSuchAlgorithmException, NoSuchProviderException {
+		
+//		// set socket and dtls config
+//		DTLSServerProtocol srvProtocol = new DTLSServerProtocol(new SecureRandom());
+		DatagramSocket socket = new DatagramSocket(cfg.getInt("api.port"));
+		ApiTLSServer tlsSrv = new ApiTLSServer();
 
-        // setup routing		
-        path("/api", () -> {
-        	
-        	get("/", (request, response) -> "Blockchain-supported Ledgering API for Decentralized Applications - v1.0");
+		int mtu = cfg.getInt("api.mtu");
+		while (true) {
+			
+			// get datagram msg for connection handshake
+			byte[] requestBuffer = new byte[mtu];
+			DatagramPacket request = new DatagramPacket(requestBuffer, requestBuffer.length);
+			socket.receive(request);
+			
+			// TODO: Create a thread here
+			try {
+				Envelope recvEnv = Envelope.fromBytes(request.getData());
+				Envelope respEnv = null;
+				// parse operation to respond
+				switch (recvEnv.getOpCode()) {
+					case Envelope.OP_GET_CONTRACT:
+						respEnv = getContract(recvEnv, null);
+						break;
+					case Envelope.OP_SIGN_CONTRACT:
+						respEnv = signContract(recvEnv, null);
+						break;
+					case Envelope.OP_QUERY:
+						respEnv = queryOperation(recvEnv, null);
+						break;
+					case Envelope.OP_INVOKE:
+						respEnv = invokeOperation(recvEnv, null);
+						break;
+				}
+				byte[] responseBuffer = null;
+				
+				// respond to client
+				InetAddress clientAddress = request.getAddress();
+				int clientPort = request.getPort();
+		 
+	            DatagramPacket response = new DatagramPacket(responseBuffer, responseBuffer.length, clientAddress, clientPort);
+	            socket.send(response);
+			
+			} catch (SocketTimeoutException e) {
+				
+			}
+			
+			// connect
+//			System.out.println("Accepting connection from " + request.getAddress().getHostAddress() + ":" + request.getPort());
+//			socket.connect(request.getAddress(), request.getPort());
+//			
+//			// create the server
+//			DatagramTransport transport = new UDPTransport(socket, mtu);
+//			DTLSTransport dtlsSrv = srvProtocol.accept(tlsSrv, transport);
+//			
+//			while (!socket.isClosed()) {
+//				try {
+//					
+//				} catch (SocketTimeoutException e) {
+//					
+//				}
+//			}
+			
 
-            path("/:channel", () -> {
-                
-                path("/contract", () -> {
-                
-	                // get contract specification
-	                get("/:cid", (req, rsp) -> getContract(req, rsp));
-	                post("/:cid/sign", (req, rsp) -> {
-
-	                	String channel = req.params(":channel");
-	                	String cid = req.params(":cid");
-	                	Pair<Boolean,Exception> result = postContractSign(req, rsp);
-	                	
-	                	if (result.getRight() != null || !result.getLeft()) {
-
-                	    	rsp.status(500);
-//	                		if (shouldReturnHtml(req)) {
-	                			// return html
-	                	    	rsp.type("text/html");
-	                    		return body().with(
-	                				h3("Error signing!"),
-	                    			div(result.getRight().getMessage()) // TODO: messages aren't descriptive. some exceptions just reutrn null pointer
-	                    		).render();
-//	                		} else {
-//	                			// return json
-//	                	    	rsp.type("application/json");
-//	                			JsonNode root = jsonMapper.createObjectNode();
-//	                			((ObjectNode) root).put("status", 500);
-//	                			JsonNode root
-//	                			((ObjectNode) root).put("response", result.getRight().getMessage());
-//	                			return jsonMapper.writerWithDefaultPrettyPrinter().writeValueAsString(root);
-//	                		}
-
-	                	}
-	                	
-	                	rsp.redirect("/api/" + channel + "/contract/" + cid);
-	                	return null;
-	                });
-	                
-	                // query contract
-	                get("/:cid/query", (req, rsp) -> getQueryOperation(req, rsp));
-	                post("/:cid/query", (req, rsp) -> {
-	                	
-	                	Pair<ChaincodeResult,Exception> result = postQueryOperation(req, rsp);
-	                	
-	                	if (result.getRight() != null) {
-                	    	rsp.status(400);
-                	    	rsp.type("text/html");
-                    		return body().with(
-                				h3("Invocation result: FAIL"),
-                    			div(result.getRight().getMessage()),
-                    			div(result.getRight().getCause() != null? result.getRight().getCause().getMessage() : "")
-                    		).render();
-	                	}
-	                	
-	                	if (result.getLeft() == null || result.getLeft().getStatus() == ChaincodeResult.CHAINCODE_FAILURE) {
-                	    	rsp.status(500);
-                	    	rsp.type("text/html");
-                    		return body().with(
-                    			h3("Query result: FAIL"),
-                    			div("Couldn't execute query!")
-                    		).render();
-	                	}
-
-	                	rsp.status(200);
-	                	rsp.type("text/html");
-	                	return body().with(
-	                			h3("Query result: OK"),
-	                			div("Response: " + result.getLeft().getContent())
-	                	).render();
-	                });
-	                
-	                // invoke contract operation
-	                get("/:cid/invoke", (req, rsp) -> getInvokeOperation(req, rsp));
-	                post("/:cid/invoke", (req, rsp) -> {
-	                	
-	                	Pair<ChaincodeResult,Exception> result = postInvokeOperation(req, rsp);
-	                	
-	                	if (result.getRight() != null) {
-                	    	rsp.status(400);
-                	    	rsp.type("text/html");
-                    		return body().with(
-                				h3("Invocation result: FAIL"),
-                    			div(result.getRight().getMessage()),
-                    			div(result.getRight().getCause() != null? result.getRight().getCause().getMessage() : "")
-                    		).render();
-	                	}
-
-	                	if (result.getLeft() == null || result.getLeft().getStatus() == ChaincodeResult.CHAINCODE_FAILURE) {
-                	    	rsp.status(500);
-                	    	rsp.type("text/html");
-                    		return body().with(
-                				h3("Invocation result: FAIL"),
-                    			div("Couldn't execute invocation!")
-                    		).render();
-	                	}
-	                	
-	                	List<ByteString> signatures = result.getLeft().getSignatures();
-	                	List<String> sigResult = new ArrayList<String>();
-	                	for (ByteString sig : signatures) {
-	                		byte[] b64sig = Base64.getEncoder().encode(sig.toByteArray());
-	                		sigResult.add(new String(b64sig));
-	                	}
-	                	
-	                	rsp.status(200);
-	                	rsp.type("text/html");
-	                	return body().with(
-	                			h3("Invocation result: OK"),
-	                			div("Timestamp: " + result.getLeft().getTimestamp().toString()),
-	                			div("Peer endorsement signature(s): "),
-	                			br(),
-	                			each(sigResult, sig -> div(
-                					sig
-	                			).with(br(), br()))
-	                	).render();
-	                });
-                });
-            });
-        });
+		}
 	}
 	
 	/* ---------------------- API METHODS --------------------- */
 
-	private static String getContract(Request req, Response rsp) {
+	private static Envelope getContract(Envelope env, X509Certificate clientCrt) {
 		
-		// parse parameters
-		String channel = req.params(":channel");
-    	String cid = req.params(":cid");
+		// get parameters
+		String channel = env.getChannelId();
+    	String cid = env.getContractId();
     	
-    	// delegate get contract to interpreter
-    	Contract contract = null;
 		try {
-			contract = ci.getContract(channel, cid, extractClientCrt(req));
-		} catch (Exception e) {
-    		rsp.status(404);
-    		rsp.type("text/html");
-    		return body().with(
-    			h3("Couldn't find the contract you specified!"),
-    			div().with(
-    				p("Make sure you've typed its ID correctly and that it exists."),
-    				p(e.getMessage())
-    			)
-    		).render();
-		}
-    	
-		
-		// produce an hash of the contract
-    	String contractHash = null;
-		try {
+	    	// delegate get contract to interpreter
+			Contract contract = ci.getContract(channel, cid, clientCrt);
+			
+			// produce an hash of the contract
 			MessageDigest md = MessageDigest.getInstance("SHA-256");
 			md.update(contract.getRawRepresentation().getBytes());
-			contractHash = new String(Base64.getEncoder().encode(md.digest()));
-		} catch (NoSuchAlgorithmException e) {
-			e.printStackTrace();
+			final String contractHash = new String(Base64.getEncoder().encode(md.digest()));
+			
+			// create json payload
+			ObjectMapper om = new ObjectMapper();
+			ObjectNode jsonResult = om.createObjectNode();
+			jsonResult.put("contract", contract.getRawRepresentation());
+			jsonResult.put("is-signed", contract.getSignature() != null && !contract.getSignature().isEmpty());
+			jsonResult.put("hash", contractHash);
+			final byte[] payload = om.writer().writeValueAsBytes(jsonResult);
+			
+			// create envelope
+			return new Envelope(Envelope.RSP_GET_CONTRACT, channel, cid, payload);
+			
+		} catch (Exception e) {
+			return throwErrorEnvelope(e, channel, cid);
 		}
-    	
+	}
+	
+//	private static X509Certificate extractClientCrt(Request req) {
+//		X509Certificate[] crtList = (X509Certificate[]) req.raw().getAttribute("javax.servlet.request.X509Certificate");
+//		return crtList[0];
+//	}
+	
+	private static Envelope signContract(Envelope env, X509Certificate clientCrt) {
 
-		// return html
-    	rsp.status(200);
-    	rsp.type("text/html");
-		return body().with(
-		    h3("Contract ID: " + cid),
-		    div().with(
-		    	p("Below is all metadata related with the contract:")
-		    ),
-		    pre(contract.getPrettyPrintRepresentation()),
-		    br(),
-    		contract.getSignature() != null && !contract.getSignature().isEmpty()?
-    				div("SIGNED").withStyle("color:green") :
-					div("NOT SIGNED").withStyle("color:red"), 
-		    				
-			contract.getSignature() != null && !contract.getSignature().isEmpty()?
-		    		div("Contract is signed. Below is the SHA256 hash of the contract and your signature."):
-		    		div("Please sign the below SHA256 hash of the contract with your private key (using openssl or an utility), copy the signature to the field below (in base64 format) and press accept if you agree with the contract."),
-		    br(),
-		    form()
-	    	.withMethod("POST")
-	    	.withAction(cid + "/sign")
-	    	.withId("signContractForm")
-	    	.with(
-	    		div(
-	    			textarea(contractHash)
-			    	.attr("rows", 4)
-			    	.attr("cols", 100)
-			    	.attr("readonly")
-		    	),
-	    		div(
-	    			textarea(contract.getSignature() != null && !contract.getSignature().isEmpty()? contract.getSignature() : "")
-			    	.attr("form", "signContractForm")
-			    	.attr("rows", 10)
-			    	.attr("cols", 100)
-			    	.withId("signature")
-			    	.withName("signature")
-			    	.withPlaceholder(
-			    			"Paste your signature here."
-			    	)
-			    	.isRequired()
-	    		),
-	    		div().with(
-		    		span().with(
-		    				
-		    			button("Accept & sign")
-		    			.withType("submit")
-		    			.withCondHidden(contract.getSignature() != null && !contract.getSignature().isEmpty()),
-		    			
-		    			button("Reject")
-		    			.withType("cancel")
-		    			.withCondHidden(contract.getSignature() != null && !contract.getSignature().isEmpty())
-				    )
-	    		)
-	    	)
-		).render();
-	}
-	
-	private static X509Certificate extractClientCrt(Request req) {
-		X509Certificate[] crtList = (X509Certificate[]) req.raw().getAttribute("javax.servlet.request.X509Certificate");
-		return crtList[0];
-	}
-	
-	private static Pair<Boolean,Exception> postContractSign(Request req, Response rsp) throws UnsupportedEncodingException {
 		
-		Exception exc = null;
-		
-		String channel = req.params(":channel");
-		String cid = req.params(":cid");
-    	String clientSig = req.queryParams("signature");
-    	boolean result = false;
-	
+		String channel = env.getChannelId();
+		String cid = env.getContractId();
+    	
 		// get client crt first
     	try {
-    		result = ci.signContract(channel, cid, extractClientCrt(req), clientSig);
+        	String clientSig = new String(env.getPayload());
+    		boolean result = ci.signContract(channel, cid, clientCrt, clientSig);
+
+    		ObjectMapper om = new ObjectMapper();
+			ObjectNode jsonResult = om.createObjectNode();
+			jsonResult.put("result", result);
+			final byte[] payload = om.writer().writeValueAsBytes(jsonResult);
+			
+			// create envelope
+			return new Envelope(Envelope.RSP_SIGN_CONTRACT, channel, cid, payload);
 		} catch (Exception e) {
-			exc = e;
+			return throwErrorEnvelope(e, channel, cid);
 		}
-        	
-		return new Pair<Boolean,Exception>(result,exc);
 	}
 	
-	private static String getQueryOperation(Request req, Response rsp) {
-		
-		String channel = req.params(":channel");
-		String cid = req.params(":cid");
-		// execute action
-		
-		// return html
-    	rsp.status(200);
-    	rsp.type("text/html");
-		return body().with(
-		    h3("Contract ID: " + cid),
-		    div().with(
-		    	p("Fill in querying details. View contract details if you need to know what functions are supported:"),
-		    	br(),
-		    	form()
-		    	.withMethod("POST")
-		    	.withAction("query")
-		    	.withId("queryOperationForm")
-		    	.with(
-				    	// operation id
-				    	span("Function to query: "),
-				    	input()
-				    	.withType("text")
-				    	.withId("operationId")
-				    	.withName("operationId")
-				    	.withPlaceholder("e.g. GetCarByLicensePlate")
-				    	.isRequired(),
-				    	br(),
-				    	
-				    	// transaction / data details
-				    	div("Arguments to be fed to the function (separate arguments by a '|'): "),
-				    	textarea()
-				    	.attr("form", "queryOperationForm")
-				    	.attr("rows", 20)
-				    	.attr("cols", 70)
-				    	.withId("operationArgs")
-				    	.withName("operationArgs")
-				    	.withPlaceholder("e.g. \n\n64-44-KL"),
-				    	
-				    	// submit
-				    	br(),
-				    	button("Query")
-				    	.withType("submit")
-		    	)
-		    )
-		).render();
-	}
-	
-	private static String getInvokeOperation(Request req, Response rsp) {
-		
-		String channel = req.params(":channel");
-		String cid = req.params(":cid");
-		// execute action
-		
-		// return html
-    	rsp.status(200);
-    	rsp.type("text/html");
-		return body().with(
-		    h3("Contract ID: " + cid),
-		    div().with(
-		    	p("Fill in invocation details. View contract details if you need to know what functions are supported:"),
-		    	br(),
-		    	form()
-		    	.withMethod("POST")
-		    	.withAction("invoke")
-		    	.withId("invokeOperationForm")
-		    	.with(
-				    	// operation id
-				    	span("Function to invoke: "),
-				    	input()
-				    	.withType("text")
-				    	.withId("operationId")
-				    	.withName("operationId")
-				    	.withPlaceholder("e.g. BuyNewCar")
-				    	.isRequired(),
-				    	br(),
-				    	
-				    	// transaction / data details
-				    	div("Arguments to be fed to the function (separate arguments by a '|'): "),
-				    	textarea()
-				    	.attr("form", "invokeOperationForm")
-				    	.attr("rows", 20)
-				    	.attr("cols", 70)
-				    	.withId("operationArgs")
-				    	.withName("operationArgs")
-				    	.withPlaceholder("e.g. \n\n39128340614;\nexample-string;\n{\n\tbrand: 'Fiat',\n\tmodel: '500', \n\tunits: 1"
-				    			+ "\n\tcar-id: ['u8d923-da8313-28mc3-km093i'], \n\tpayment-details: {\n\t\tamount-to-be-payed: '30000',"
-				    			+ "\n\t\tcurrency: 'euro', \n\t\tamount-paying: '30000', \n\t\tpayment-method: 'credit-card',"
-				    			+ "\n\t\tpayment-policy: '100%'\n\t}\n}"),
-				    	
-				    	// submit
-				    	br(),
-				    	button("Invoke")
-				    	.withType("submit")
-		    	)
-		    )
-		).render();
-	}
-	
-	private static Pair<ChaincodeResult,Exception> postQueryOperation(Request req, Response rsp) {
-    	return postOperation(req, rsp, Dispatcher.CHAINCODE_QUERY_OPERATION);
+	private static Envelope queryOperation(Envelope env, X509Certificate clientCrt) {
+    	return postOperation(env, clientCrt, Dispatcher.CHAINCODE_QUERY_OPERATION);
 	}
 	
 	
-	private static Pair<ChaincodeResult,Exception> postInvokeOperation(Request req, Response rsp) {
-    	return postOperation(req, rsp, Dispatcher.CHAINCODE_INVOKE_OPERATION);
+	private static Envelope invokeOperation(Envelope env, X509Certificate clientCrt) {
+    	return postOperation(env, clientCrt, Dispatcher.CHAINCODE_INVOKE_OPERATION);
 	}
 	
-	private static Pair<ChaincodeResult,Exception> postOperation(Request req, Response rsp, int type) {
+	private static Envelope postOperation(Envelope env, X509Certificate clientCrt, int type) {
+
 		
-		Exception exc = null;
-		
-		String channel = req.params(":channel");
-    	String cid = req.params(":cid");
-    	String oid = req.queryParams("operationId");
-    	String oargs = req.queryParams("operationArgs");
+		String channel = env.getChannelId();
+    	String cid = env.getContractId();
+    	String oid = env.getFunction();
     	
-    	ChaincodeResult result = null;
-    	// dynamically using logic of contract
-    	// 280f06d6-2c1d-48fc-a5ba-3bfacc42ba08 | { "foo": 123, "bar": "abc" }
-    	
-    	String[] args = oargs.split("\\|");
-    	for (int i = 0; i < args.length; i++) {
-    		args[i] = args[i].trim();
+    	try {
+    		// get the payload arguments
+			ObjectMapper om = new ObjectMapper();
+    		String[] oargs = om.readValue(new String(env.getPayload()), String[].class);
+    		
+    		// execute the function
+    		ChaincodeResult result = ci.verifyAndExecuteContract(type, channel, cid, oid, clientCrt, oargs);
+    		// check for chain code failure
+    		if (result == null || result.getStatus() == ChaincodeResult.CHAINCODE_FAILURE) {
+				return throwErrorEnvelope(new Exception("Chaincode failure when performing " 
+						+ (type == Dispatcher.CHAINCODE_QUERY_OPERATION? "query" : "invocation")), channel, cid);
+    		}
+    		
+    		
+			// parse signatures and put them into a usable format
+        	List<String> signatures = result.getSignatures();
+        	// put arrays into json array and finalize object
+        	ArrayNode jsonArray = om.valueToTree(signatures);
+        	ObjectNode jsonResult = om.createObjectNode();
+        	jsonResult.putArray("signatures").addAll(jsonArray);
+    		short opcode = -1;
+    		
+			switch (type) {
+				case Dispatcher.CHAINCODE_INVOKE_OPERATION:
+					// invoke just needs timestamp for transaction confirmal
+		        	DateFormat df = new SimpleDateFormat("dd/MM/yyyy HH:mm:ss");
+		        	jsonResult.put("timestamp", df.format(result.getTimestamp()));
+					opcode = Envelope.RSP_INVOKE;
+					break;
+	            	
+				case Dispatcher.CHAINCODE_QUERY_OPERATION:
+					// query needs query results
+					jsonResult.put("result", result.getContent());
+					opcode = Envelope.RSP_QUERY;
+					break;
+					
+				default:
+					throwErrorEnvelope(new Exception("Unknown chaincode response"), channel, cid);
+			}
+			
+			byte[] payload = om.writer().writeValueAsBytes(jsonResult);
+        	return new Envelope(opcode, channel, cid, payload);
+    		
+    	} catch (Exception e) {
+			return throwErrorEnvelope(e, channel, cid);
     	}
     	
-		try {
-	    	if (args.length == 0)
-	    		throw new InvalidArgumentException("No arguments were able to be parsed! Please validate your input!");
-	    	
-	    	result = ci.verifyAndExecuteContract(type, channel, cid, oid, extractClientCrt(req), args);
-	    	
-		} catch (Exception e) {
-			exc = e;
-		} 
-    	
-    	return new Pair<ChaincodeResult,Exception>(result, exc);
 	}
+	
+	private static Envelope throwErrorEnvelope(Exception e, String channel, String cid) {
+
+		try {			
+			ObjectMapper om = new ObjectMapper();
+			
+			// put exception details into json
+			ObjectNode jsonResult = om.createObjectNode();
+			jsonResult.put("error", e.toString().getBytes());
+			byte[] payload = om.writer().writeValueAsBytes(jsonResult);
+			return new Envelope(Envelope.ERR, channel, cid, payload);			
 		
-	private static boolean shouldReturnHtml(Request request) {
-	    String accept = request.headers("Accept");
-	    return accept != null && accept.contains("text/html");
+		} catch (JsonProcessingException jpe) {
+			jpe.printStackTrace();
+		}
+		return null;
 	}
 
 
