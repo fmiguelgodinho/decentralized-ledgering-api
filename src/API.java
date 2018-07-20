@@ -42,6 +42,7 @@ import server.DTLSGenCookieContext;
 import server.DTLSIOContext;
 import server.DTLSRecvCallback;
 import server.DTLSSendCallback;
+import server.DTLSVerifyCallback;
 import server.Envelope;
 import util.NodeConnection;
 
@@ -190,6 +191,7 @@ public class API {
 			DTLSGenCookieContext gctx = new DTLSGenCookieContext(hostAddress, port);
 			ssl.setGenCookieCtx(gctx);
 
+			// accept new connection
 			ret = ssl.accept();
 			if (ret != WolfSSL.SSL_SUCCESS) {
 				int err = ssl.getError(ret);
@@ -197,35 +199,29 @@ public class API {
 				System.out.println("wolfSSL_accept failed. err = " + err + ", " + errString);
 				System.exit(1);
 			}
+			
             /* read client response, and echo */
 			byte[] reqBuffer = new byte[mtu];
             ret = ssl.read(reqBuffer, reqBuffer.length);
             // DO SOMETHING WITH RET: VALIDATION
-            /* show peer info */
-			showClientCertificate(ssl);
 			
 			try {
-				// get client crt
-				long clientCrt = ssl.getPeerCertificate();
-				if (clientCrt == 0) {
-					throw new CertificateException("Client did not present a valid certificate");
-				}
 				
 				Envelope recvEnv = Envelope.fromBytes(reqBuffer);
 				Envelope respEnv = null;
 				// parse operation to respond
 				switch (recvEnv.getOpCode()) {
 				case Envelope.OP_GET_CONTRACT:
-					respEnv = getContract(recvEnv, null);
+					respEnv = getContract(recvEnv);
 					break;
 				case Envelope.OP_SIGN_CONTRACT:
-					respEnv = signContract(recvEnv, null);
+					respEnv = signContract(recvEnv);
 					break;
 				case Envelope.OP_QUERY:
-					respEnv = queryOperation(recvEnv, null);
+					respEnv = queryOperation(recvEnv);
 					break;
 				case Envelope.OP_INVOKE:
-					respEnv = invokeOperation(recvEnv, null);
+					respEnv = invokeOperation(recvEnv);
 					break;
 				}
 	
@@ -253,15 +249,16 @@ public class API {
 
 	/* ---------------------- API METHODS --------------------- */
 
-	private static Envelope getContract(Envelope env, X509Certificate clientCrt) {
+	private static Envelope getContract(Envelope env) {
 
 		// get parameters
 		String channel = env.getChannelId();
 		String cid = env.getContractId();
+		byte[] pubKey = env.getPublicKey();
 
 		try {
 			// delegate get contract to interpreter
-			Contract contract = ci.getContract(channel, cid, clientCrt);
+			Contract contract = ci.getContract(channel, cid, pubKey);
 
 			// produce an hash of the contract
 			MessageDigest md = MessageDigest.getInstance("SHA-256");
@@ -284,21 +281,16 @@ public class API {
 		}
 	}
 
-	// private static X509Certificate extractClientCrt(Request req) {
-	// X509Certificate[] crtList = (X509Certificate[])
-	// req.raw().getAttribute("javax.servlet.request.X509Certificate");
-	// return crtList[0];
-	// }
-
-	private static Envelope signContract(Envelope env, X509Certificate clientCrt) {
+	private static Envelope signContract(Envelope env) {
 
 		String channel = env.getChannelId();
 		String cid = env.getContractId();
+		byte[] pubKey = env.getPublicKey();
 
 		// get client crt first
 		try {
 			String clientSig = new String(env.getPayload());
-			boolean result = ci.signContract(channel, cid, clientCrt, clientSig);
+			boolean result = ci.signContract(channel, cid, pubKey, clientSig);
 
 			ObjectMapper om = new ObjectMapper();
 			ObjectNode jsonResult = om.createObjectNode();
@@ -312,19 +304,20 @@ public class API {
 		}
 	}
 
-	private static Envelope queryOperation(Envelope env, X509Certificate clientCrt) {
-		return postOperation(env, clientCrt, Dispatcher.CHAINCODE_QUERY_OPERATION);
+	private static Envelope queryOperation(Envelope env) {
+		return postOperation(env, Dispatcher.CHAINCODE_QUERY_OPERATION);
 	}
 
-	private static Envelope invokeOperation(Envelope env, X509Certificate clientCrt) {
-		return postOperation(env, clientCrt, Dispatcher.CHAINCODE_INVOKE_OPERATION);
+	private static Envelope invokeOperation(Envelope env) {
+		return postOperation(env, Dispatcher.CHAINCODE_INVOKE_OPERATION);
 	}
 
-	private static Envelope postOperation(Envelope env, X509Certificate clientCrt, int type) {
+	private static Envelope postOperation(Envelope env, int type) {
 
 		String channel = env.getChannelId();
 		String cid = env.getContractId();
 		String oid = env.getFunction();
+		byte[] pubKey = env.getPublicKey();
 
 		try {
 			// get the payload arguments
@@ -332,7 +325,7 @@ public class API {
 			String[] oargs = om.readValue(new String(env.getPayload()), String[].class);
 
 			// execute the function
-			ChaincodeResult result = ci.verifyAndExecuteContract(type, channel, cid, oid, clientCrt, oargs);
+			ChaincodeResult result = ci.verifyAndExecuteContract(type, channel, cid, oid, pubKey, oargs);
 			// check for chain code failure
 			if (result == null || result.getStatus() == ChaincodeResult.CHAINCODE_FAILURE) {
 				return throwErrorEnvelope(
@@ -393,33 +386,6 @@ public class API {
 		return null;
 	}
 	
-	private static void showClientCertificate(WolfSSLSession ssl) {
-
-		String altname;
-		long peerCrtPtr;
-
-		try {
-
-			peerCrtPtr = ssl.getPeerCertificate();
-
-			if (peerCrtPtr != 0) {
-
-				System.out.println("issuer : " + ssl.getPeerX509Issuer(peerCrtPtr));
-				System.out.println("subject : " + ssl.getPeerX509Subject(peerCrtPtr));
-
-				while ((altname = ssl.getPeerX509AltName(peerCrtPtr)) != null)
-					System.out.println("altname = " + altname);
-
-			} else {
-				System.out.println("peer has no cert!\n");
-			}
-
-			System.out.println("SSL version is " + ssl.getVersion());
-			System.out.println("SSL cipher suite is " + ssl.cipherGetName());
-
-		} catch (WolfSSLJNIException e) {
-			e.printStackTrace();
-		}
-	}
+	
 
 }

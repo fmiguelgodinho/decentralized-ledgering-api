@@ -1,5 +1,6 @@
 package server;
 
+import com.wolfssl.WolfSSL;
 import com.wolfssl.WolfSSLVerifyCallback;
 
 public class DTLSVerifyCallback implements WolfSSLVerifyCallback {
@@ -8,6 +9,11 @@ public class DTLSVerifyCallback implements WolfSSLVerifyCallback {
         System.out.println("Hello from Java verify callback!");
         System.out.println(preverify_ok);
         System.out.println(x509StorePtr);
-        return 0;
+        
+
+		byte[] der = WolfSSL.x509_getDer(x509StorePtr);
+		
+        
+        return 1;
     }
 }

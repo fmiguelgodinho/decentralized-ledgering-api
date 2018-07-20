@@ -2,10 +2,13 @@ package util;
 
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
-import java.net.DatagramPacket;
+import java.io.FileInputStream;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.security.PublicKey;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
 
 import com.wolfssl.WolfSSL;
 import com.wolfssl.WolfSSLContext;
@@ -87,9 +90,13 @@ public class UdpClient {
                     ", " + errString);
             System.exit(1);
         }
+        
+        CertificateFactory fact = CertificateFactory.getInstance("X.509");
+        FileInputStream fis = new FileInputStream("crypto/client.pem");
+        X509Certificate cer = (X509Certificate) fact.generateCertificate(fis);
+        PublicKey key = cer.getPublicKey();
 
-		
-		Envelope env = new Envelope(Envelope.OP_GET_CONTRACT, "mainchannel", "xcc");
+		Envelope env = new Envelope(Envelope.OP_GET_CONTRACT, "mainchannel", "xcc",key.getEncoded());
 		byte[] envbytes = Envelope.toBytes(env);
         /* test write(long, byte[], int) */
         ret = ssl.write(envbytes, envbytes.length);
@@ -107,5 +114,7 @@ public class UdpClient {
         }
 
 	}
+	
+
 
 }

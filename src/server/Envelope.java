@@ -6,7 +6,7 @@ public class Envelope {
 
 	public static final short ERR = -1;						// ENV: -1|n|channel|n|contract|0|n|payload(error)
 	
-	public static final short OP_GET_CONTRACT = 0;			// ENV: 0|n|channel|n|contract|0|0
+	public static final short OP_GET_CONTRACT = 0;			// ENV: 0|n|channel|n|contract|0|0|n|pubkey
 	public static final short OP_SIGN_CONTRACT = 1;			// ENV: 1|n|channel|n|contract|0|n|payload(signature)
 	public static final short OP_QUERY = 2;					// ENV: 2|n|channel|n|contract|n|function|n|payload(args)
 	public static final short OP_INVOKE = 3;				// ENV: 3|n|channel|n|contract|n|function|n|payload(args)
@@ -21,19 +21,21 @@ public class Envelope {
 	private String function;
 	private byte[] payload;
 	
-	public Envelope(short operation, String channelId, String contractId) {
-		this(operation, channelId, contractId, null, null);
+	private byte[] pubKey;									// public key that can be annexed to the envelope, usually set by a client app
+	
+	public Envelope(short operation, String channelId, String contractId, byte[] pubKey) {
+		this(operation, channelId, contractId, null, null, pubKey);
 	}
 	
-	public Envelope(short operation, String channelId, String contractId, byte[] payload) {
-		this(operation, channelId, contractId, null, payload);
+	public Envelope(short operation, String channelId, String contractId, byte[] payload, byte[] pubKey) {
+		this(operation, channelId, contractId, null, payload, pubKey);
 	}
 	
-	public Envelope(short operation, String channelId, String contractId, String function) {
-		this(operation, channelId, contractId, function, null);
+	public Envelope(short operation, String channelId, String contractId, String function, byte[] pubKey) {
+		this(operation, channelId, contractId, function, null, pubKey);
 	}
 	
-	public Envelope(short operation, String channelId, String contractId, String function, byte[] payload) throws IllegalArgumentException {
+	public Envelope(short operation, String channelId, String contractId, String function, byte[] payload, byte[] pubKey) throws IllegalArgumentException {
 		
 		if (operation < ERR || operation > RSP_INVOKE) {
 			throw new IllegalArgumentException("Op code on envelope is not recognized.");
@@ -52,6 +54,7 @@ public class Envelope {
 		
 		this.function = function;
 		this.payload = payload;
+		this.pubKey = pubKey;
 	}
 	
 	public short getOpCode() {
@@ -72,6 +75,14 @@ public class Envelope {
 	
 	public byte[] getPayload() {
 		return payload;
+	}
+	
+	public byte[] getPublicKey() {
+		return pubKey;
+	}
+	
+	public void setPublicKey(byte[] pubKey) {
+		this.pubKey = pubKey;
 	}
 	
 	public static Envelope fromBytes(byte[] raw) {
@@ -109,7 +120,16 @@ public class Envelope {
 			wrapped.get(payload);
 		}
 		
-		return new Envelope(operation, channelId, contractId, function, payload);
+		// finally get public key (if any)
+		byte[] pubKey = null;
+		int pubKeySize = wrapped.getInt();
+		if (pubKeySize > 0) {
+			pubKey = new byte[pubKeySize];
+			wrapped.get(pubKey);
+		}
+		
+
+		return new Envelope(operation, channelId, contractId, function, payload, pubKey);
 	}
 	
 	public static byte[] toBytes(Envelope env) {
@@ -120,6 +140,7 @@ public class Envelope {
 		byte[] contractId = env.getContractId().getBytes();
 		byte[] function = null;					// this one we need to check after
 		byte[] payload = env.getPayload();
+		byte[] pubkey = env.getPublicKey();
 		
 		// check if this exists
 		String functionStr = env.getFunction();
@@ -132,6 +153,7 @@ public class Envelope {
 				Short.BYTES + Integer.BYTES + channelId.length + Integer.BYTES + contractId.length
 				+ (function != null? Integer.BYTES + function.length : Integer.BYTES)
 				+ (payload != null? Integer.BYTES + payload.length : Integer.BYTES)
+				+ (pubkey != null? Integer.BYTES + pubkey.length : Integer.BYTES)
 		);
 		
 		// put into the buffer
@@ -149,6 +171,12 @@ public class Envelope {
 		if (payload != null) {
 			buf.putInt(payload.length);
 			buf.put(payload);
+		} else {
+			buf.putInt(0);
+		}
+		if (pubkey != null) {
+			buf.putInt(pubkey.length);
+			buf.put(pubkey);
 		} else {
 			buf.putInt(0);
 		}

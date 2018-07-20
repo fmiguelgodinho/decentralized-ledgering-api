@@ -1,3 +1,4 @@
 - Install JAVA ME
 - Install wolfssl github.com/wolfssl/wolfssl.git
+			configure with --enable-jni and --enable-savecert
 - Install wolfssljni github.com/wolfssl/wolfssljni.git

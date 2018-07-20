@@ -2,11 +2,15 @@ package core;
 
 import java.io.UnsupportedEncodingException;
 import java.security.InvalidKeyException;
+import java.security.KeyFactory;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.security.PublicKey;
 import java.security.Signature;
 import java.security.SignatureException;
 import java.security.cert.X509Certificate;
+import java.security.spec.InvalidKeySpecException;
+import java.security.spec.X509EncodedKeySpec;
 import java.text.Format;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
@@ -43,7 +47,12 @@ public class ContractInterpreter {
 	private DBCollection contractCollection;
 	private Dispatcher dpt;
 	
+	private static String signingKeyType;
+	private static String signingAlgorithm;
+	
 	public ContractInterpreter(Configuration cfg, MongoClient dbClient, Dispatcher dpt) {
+		signingKeyType = cfg.getString("contract.signing.keyType");
+		signingAlgorithm = cfg.getString("contract.signing.alg");
 		DB db = dbClient.getDB(cfg.getString("mongo.database"));
 		contractCollection = db.getCollection(cfg.getString("mongo.contractCollection"));
 		this.dpt = dpt;
@@ -51,7 +60,7 @@ public class ContractInterpreter {
 	
 	/*** LOAD AND SAVE CONTRACT METHODS ***/
 	
-	public Contract getContract(String channel, String cid, X509Certificate clientCrt) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException, NonConformantContractException, InvalidContractPropertyException {
+	public Contract getContract(String channel, String cid, byte[] clientPubkey) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException, NonConformantContractException, InvalidContractPropertyException {
 		
 		// try to first load it from db - quicker
 		Contract contract = loadContractFromDb(channel, cid);
@@ -59,14 +68,14 @@ public class ContractInterpreter {
 			return contract;
 		
 		// it wasn't in db! try to retrieve it from blockchain - slower
-		contract = loadContractFromBlockchain(channel, cid, clientCrt);
+		contract = loadContractFromBlockchain(channel, cid, clientPubkey);
 		
 		if (!contract.conformsToStandard()) {
 			throw new NonConformantContractException("Contract does not conform to standard!");
 		}
 		
 		// fetch sig from the blockchain as well
-		setContractSignature(channel, cid,  contract, clientCrt);
+		setContractSignature(channel, cid,  contract, clientPubkey);
 		
 		// save contract to db for future times
 		if (contract != null)
@@ -102,7 +111,7 @@ public class ContractInterpreter {
 		return contractObj;
 	}
 	
-	private Contract loadContractFromBlockchain(String channel, String cid, X509Certificate clientCrt) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
+	private Contract loadContractFromBlockchain(String channel, String cid, byte[] clientPubkey) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
 		
     	// query the chaincode
     	ChaincodeResult cr = executeContract(
@@ -110,7 +119,7 @@ public class ContractInterpreter {
 			channel,
 			cid, 
 			"getContractDefinition", 
-			clientCrt,
+			clientPubkey,
 			new String[] {}								// empty args
 		);
     	
@@ -142,7 +151,7 @@ public class ContractInterpreter {
 		);
 	}
 	
-	private void setContractSignature(String channel, String cid, Contract cc, X509Certificate clientCrt) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException, InvalidContractPropertyException {
+	private void setContractSignature(String channel, String cid, Contract cc, byte[] clientPubkey) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException, InvalidContractPropertyException {
 
 		// fetch client signature from contract
     	ChaincodeResult cr = verifyAndExecuteContract(
@@ -151,7 +160,7 @@ public class ContractInterpreter {
 			cid,
 			cc,
 			"getContractSignature", 
-			clientCrt,
+			clientPubkey,
 			new String[] {}								// empty args
 		);
     	
@@ -168,17 +177,17 @@ public class ContractInterpreter {
 	/**
 	 * Method for a client to sign a contract and start using it.
 	 */
-	public boolean signContract(String channel, String cid, X509Certificate clientCrt, String signature) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException, NonConformantContractException, InvalidContractPropertyException {
+	public boolean signContract(String channel, String cid, byte[] clientPubkey, String signature) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException, NonConformantContractException, InvalidContractPropertyException {
 		
 		// get again the contract the client "supposedly" signed
-    	Contract contract = getContract(channel, cid, clientCrt);
+    	Contract contract = getContract(channel, cid, clientPubkey);
     	
     	// verify sig
     	boolean isCorrectlySigned = false;
     	try {
         	// remove 64 encoding
         	byte[] signatureBytes = Base64.getDecoder().decode(signature.getBytes("UTF-8"));
-    		isCorrectlySigned = verifyClientSignature(contract, clientCrt, signatureBytes);
+    		isCorrectlySigned = verifyClientSignature(contract, clientPubkey, signatureBytes);
     		
     		if (isCorrectlySigned) {
     			
@@ -188,7 +197,7 @@ public class ContractInterpreter {
         			channel, 
         			cid,
         			"signContract", 
-        			clientCrt,
+        			clientPubkey,
         			new String[] {
     					signature
         			}
@@ -202,7 +211,7 @@ public class ContractInterpreter {
     			return true;
     		}
     		
-		} catch (InvalidKeyException | NoSuchAlgorithmException | SignatureException | UnsupportedEncodingException e) {
+		} catch (InvalidKeyException | NoSuchAlgorithmException | SignatureException | UnsupportedEncodingException | InvalidKeySpecException e) {
 			e.printStackTrace();
 		}
     	
@@ -211,16 +220,21 @@ public class ContractInterpreter {
 		return false;
 	}
 	
-	private boolean verifyClientSignature(Contract contract, X509Certificate signerCrt, byte[] signature) throws NoSuchAlgorithmException, InvalidKeyException, SignatureException {
+	private boolean verifyClientSignature(Contract contract, byte[] clientPubkey, byte[] signature) throws NoSuchAlgorithmException, InvalidKeyException, SignatureException, InvalidKeySpecException {
 		
 		// produce an hash of the contract
 		MessageDigest md = MessageDigest.getInstance("SHA-256");
 		md.update(contract.getRawRepresentation().getBytes());
 		byte[] contractHashBytes = Base64.getEncoder().encode(md.digest());
 		
-    	Signature sig = Signature.getInstance(signerCrt.getSigAlgName());
-		sig.initVerify(signerCrt.getPublicKey());
+		// reconstruct public key x506
+    	Signature sig = Signature.getInstance(signingAlgorithm);
+    	X509EncodedKeySpec pkspec = new X509EncodedKeySpec(clientPubkey);
+    	KeyFactory factory = KeyFactory.getInstance(signingKeyType);
+    	PublicKey pubKey = factory.generatePublic(pkspec);
 		
+    	// verify
+    	sig.initVerify(pubKey);
     	sig.update(contractHashBytes, 0, contractHashBytes.length);
     	return sig.verify(signature);
 	}
@@ -234,17 +248,17 @@ public class ContractInterpreter {
 	 * Main method to execute a contract function. It verifies the contract specification beforehand
 	 * To be called when contract object is not available
 	 */
-	public ChaincodeResult verifyAndExecuteContract(int op, String channelName, String cid, String function, X509Certificate clientCrt, String[] args) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException, NonConformantContractException, InvalidContractPropertyException {
+	public ChaincodeResult verifyAndExecuteContract(int op, String channelName, String cid, String function, byte[] clientPubkey, String[] args) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException, NonConformantContractException, InvalidContractPropertyException {
 		// get the contract and then verify and execute the function
-		Contract cc = getContract(channelName, cid, clientCrt);
-		return verifyAndExecuteContract(op, channelName, cid, cc, function, clientCrt, args);
+		Contract cc = getContract(channelName, cid, clientPubkey);
+		return verifyAndExecuteContract(op, channelName, cid, cc, function, clientPubkey, args);
 	}
 	
 	/**
 	 * Main method to execute a contract function. It verifies the contract specification beforehand
 	 * To be called when contract object is available
 	 */
-	public ChaincodeResult verifyAndExecuteContract(int op, String channelName, String cid, Contract cc, String function, X509Certificate clientCrt, String[] args) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException, InvalidContractPropertyException {
+	public ChaincodeResult verifyAndExecuteContract(int op, String channelName, String cid, Contract cc, String function, byte[] clientPubkey, String[] args) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException, InvalidContractPropertyException {
 		
 		// check if contract conforms to standard
 		if (cc.conformsToStandard()) {
@@ -280,7 +294,7 @@ public class ContractInterpreter {
 			
 			// TODO check if function exists and has the correct args supplied to it
 			
-			return executeContract(op, channelName, cid, function, clientCrt, args);
+			return executeContract(op, channelName, cid, function, clientPubkey, args);
 		}
 		return null;
 	}
@@ -288,11 +302,11 @@ public class ContractInterpreter {
 	/**
 	 * Final contract execution method. After contract spec has been verified
 	 */
-	private ChaincodeResult executeContract(int op, String channelName, String cid, String function, X509Certificate clientCrt, String[] args) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
+	private ChaincodeResult executeContract(int op, String channelName, String cid, String function, byte[] clientPubkey, String[] args) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
 		
 		try {
 
-			byte[] pubKey = Base64.getEncoder().encode(clientCrt.getPublicKey().getEncoded());
+			byte[] pubKey = Base64.getEncoder().encode(clientPubkey);
 
 			// put signature on first argument!
 			args = ArrayUtils.insert(0, args, new String(pubKey));
