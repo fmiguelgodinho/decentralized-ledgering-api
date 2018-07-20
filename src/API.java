@@ -145,12 +145,12 @@ public class API {
 		}
 
 		// load verify with trusted CAs
-		ret = sslCtx.loadVerifyLocations(null, cfg.getString("api.dtls.trustedCAs"));
+		ret = sslCtx.loadVerifyLocations(cfg.getString("api.dtls.clientCaCrt"), null);
         if (ret != WolfSSL.SSL_SUCCESS) {
             System.out.println("failed to load CA certificates!");
             System.exit(1);
         }
-//		sslCtx.setVerify(WolfSSL.SSL_VERIFY_NONE, null);
+		sslCtx.setVerify(WolfSSL.SSL_VERIFY_PEER, null);
 
 		// set dtls callbacks
 		sslCtx.setIORecv(new DTLSRecvCallback());
@@ -202,7 +202,7 @@ public class API {
             ret = ssl.read(reqBuffer, reqBuffer.length);
             // DO SOMETHING WITH RET: VALIDATION
             /* show peer info */
-			showPeer(ssl);
+			showClientCertificate(ssl);
 			
 			try {
 				// get client crt
@@ -393,8 +393,7 @@ public class API {
 		return null;
 	}
 	
-	// TODO: REMOVE
-	static void showPeer(WolfSSLSession ssl) {
+	private static void showClientCertificate(WolfSSLSession ssl) {
 
 		String altname;
 		long peerCrtPtr;

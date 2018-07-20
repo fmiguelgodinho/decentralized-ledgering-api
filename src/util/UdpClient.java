@@ -40,13 +40,13 @@ public class UdpClient {
 			System.exit(1);
 		}
 //		
-//		ret = sslCtx.loadVerifyLocations("crypto/trusted-ca/rootCA.pem", null);
-//        if (ret != WolfSSL.SSL_SUCCESS) {
-//            System.out.println("failed to load CA certificates!");
-//            System.exit(1);
-//        }
+		ret = sslCtx.loadVerifyLocations("crypto/trusted-ca/ca-server.pem", null);
+        if (ret != WolfSSL.SSL_SUCCESS) {
+            System.out.println("failed to load CA certificates!");
+            System.exit(1);
+        }
 		// do not verify certificates with a CA
-		sslCtx.setVerify(WolfSSL.SSL_VERIFY_NONE, null);
+		sslCtx.setVerify(WolfSSL.SSL_VERIFY_PEER, null);
 
 		// set dtls callbacks
 		sslCtx.setIORecv(new DTLSRecvCallback());
