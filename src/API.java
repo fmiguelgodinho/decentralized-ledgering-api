@@ -1,14 +1,16 @@
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
-import java.net.SocketTimeoutException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.NoSuchProviderException;
 import java.security.Security;
+import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
@@ -36,7 +38,8 @@ import core.ContractInterpreter;
 import core.Dispatcher;
 import core.dto.ChaincodeResult;
 import core.dto.Contract;
-import server.DTLSGenCookieCallback;
+import server.DTLSGenCookieContext;
+import server.DTLSIOContext;
 import server.DTLSRecvCallback;
 import server.DTLSSendCallback;
 import server.Envelope;
@@ -141,48 +144,74 @@ public class API {
 			System.exit(1);
 		}
 
-		ret = sslCtx.loadVerifyLocations(cfg.getString("api.dtls.serverCACrt"), null);
-		if (ret != WolfSSL.SSL_SUCCESS) {
-			System.out.println("failed to load CA certificates!");
-			System.exit(1);
-		}
-
-		// do not verify certificates with a CA
-		sslCtx.setVerify(WolfSSL.SSL_VERIFY_NONE, null);
-
-		// // MAYBE TODO: impl a verify callback for CA
-		// VerifyCallback vc = new VerifyCallback();
-		// sslCtx.setVerify(WolfSSL.SSL_VERIFY_PEER, vc);
-		// ret = sslCtx.setCipherList(cipherList); // TODO: use this to set ciphers if
-		// needed
+		// load verify with trusted CAs
+		ret = sslCtx.loadVerifyLocations(null, cfg.getString("api.dtls.trustedCAs"));
+        if (ret != WolfSSL.SSL_SUCCESS) {
+            System.out.println("failed to load CA certificates!");
+            System.exit(1);
+        }
+//		sslCtx.setVerify(WolfSSL.SSL_VERIFY_NONE, null);
 
 		// set dtls callbacks
 		sslCtx.setIORecv(new DTLSRecvCallback());
 		sslCtx.setIOSend(new DTLSSendCallback());
 		System.out.println("Registered I/O callbacks");
-		// register DTLS cookie generation callback
-		sslCtx.setGenCookie(new DTLSGenCookieCallback());
-		System.out.println("Registered DTLS cookie callback");
 
-		DatagramSocket socket = new DatagramSocket(cfg.getInt("api.port"));
-		socket.setSoTimeout(0);
+		// register UDP socket
+		InetAddress hostAddress = InetAddress.getLocalHost();
+		int port = cfg.getInt("api.port");
+		System.out.println("Starting DTLS server at " + hostAddress + ", port " + port);
 
+		DataInputStream is = null;
+		DataOutputStream os = null;
 		int mtu = cfg.getInt("api.mtu");
 		while (true) {
-
+			
+			// set socket
+			DatagramSocket socket = new DatagramSocket(port);
+			socket.setSoTimeout(0);
+			
 			// get datagram msg for connection handshake
 			byte[] recvBuffer = new byte[mtu];
 			DatagramPacket request = new DatagramPacket(recvBuffer, recvBuffer.length);
 			socket.receive(request);
 			socket.connect(request.getAddress(), request.getPort());
-			System.out.println("client connection received from " + request.getAddress() + " at port " + request.getPort() + "\n");
+			System.out.println("Client connection received from " + request.getAddress() + " at port " + request.getPort());
 
-			// setup ssl session
+			// setup ssl session and io context
 			WolfSSLSession ssl = new WolfSSLSession(sslCtx);
+
+			// setup io context
+			DTLSIOContext ioctx = new DTLSIOContext(os, is, socket, hostAddress, port);
+			ssl.setIOReadCtx(ioctx);
+			ssl.setIOWriteCtx(ioctx);
+
+			// register DTLS cookie generation callback
+			DTLSGenCookieContext gctx = new DTLSGenCookieContext(hostAddress, port);
+			ssl.setGenCookieCtx(gctx);
+
+			ret = ssl.accept();
+			if (ret != WolfSSL.SSL_SUCCESS) {
+				int err = ssl.getError(ret);
+				String errString = sslLib.getErrorString(err);
+				System.out.println("wolfSSL_accept failed. err = " + err + ", " + errString);
+				System.exit(1);
+			}
+            /* read client response, and echo */
+			byte[] reqBuffer = new byte[mtu];
+            ret = ssl.read(reqBuffer, reqBuffer.length);
+            // DO SOMETHING WITH RET: VALIDATION
+            /* show peer info */
+			showPeer(ssl);
 			
-			// TODO: Create a thread here
 			try {
-				Envelope recvEnv = Envelope.fromBytes(request.getData());
+				// get client crt
+				long clientCrt = ssl.getPeerCertificate();
+				if (clientCrt == 0) {
+					throw new CertificateException("Client did not present a valid certificate");
+				}
+				
+				Envelope recvEnv = Envelope.fromBytes(reqBuffer);
 				Envelope respEnv = null;
 				// parse operation to respond
 				switch (recvEnv.getOpCode()) {
@@ -199,34 +228,25 @@ public class API {
 					respEnv = invokeOperation(recvEnv, null);
 					break;
 				}
-
-				// create rsp buffer
+	
+				// create rsp buffer & respond to client
 				byte[] respBuffer = Envelope.toBytes(respEnv);
-
-				// respond to client
-				DatagramPacket response = new DatagramPacket(respBuffer, respBuffer.length, request.getAddress(), request.getPort());
-				socket.send(response);
-
-			} catch (SocketTimeoutException e) {
-
+				
+	            ret = ssl.write(respBuffer, respBuffer.length);
+	            if (ret != respBuffer.length) {
+	                System.out.println("ssl.write() failed");
+	                System.exit(1);
+	            }
+			} catch (Exception e) {
+				System.err.println(e.toString());
+			} finally {
+			
+				// shutdown ssl and disconnect socket
+	            ssl.shutdownSSL();
+	            ssl.freeSSL();
+	            socket.disconnect();
+	            socket.close();
 			}
-
-			// connect
-			// System.out.println("Accepting connection from " +
-			// request.getAddress().getHostAddress() + ":" + request.getPort());
-			// socket.connect(request.getAddress(), request.getPort());
-			//
-			// // create the server
-			// DatagramTransport transport = new UDPTransport(socket, mtu);
-			// DTLSTransport dtlsSrv = srvProtocol.accept(tlsSrv, transport);
-			//
-			// while (!socket.isClosed()) {
-			// try {
-			//
-			// } catch (SocketTimeoutException e) {
-			//
-			// }
-			// }
 
 		}
 	}
@@ -371,6 +391,36 @@ public class API {
 			jpe.printStackTrace();
 		}
 		return null;
+	}
+	
+	// TODO: REMOVE
+	static void showPeer(WolfSSLSession ssl) {
+
+		String altname;
+		long peerCrtPtr;
+
+		try {
+
+			peerCrtPtr = ssl.getPeerCertificate();
+
+			if (peerCrtPtr != 0) {
+
+				System.out.println("issuer : " + ssl.getPeerX509Issuer(peerCrtPtr));
+				System.out.println("subject : " + ssl.getPeerX509Subject(peerCrtPtr));
+
+				while ((altname = ssl.getPeerX509AltName(peerCrtPtr)) != null)
+					System.out.println("altname = " + altname);
+
+			} else {
+				System.out.println("peer has no cert!\n");
+			}
+
+			System.out.println("SSL version is " + ssl.getVersion());
+			System.out.println("SSL cipher suite is " + ssl.cipherGetName());
+
+		} catch (WolfSSLJNIException e) {
+			e.printStackTrace();
+		}
 	}
 
 }
