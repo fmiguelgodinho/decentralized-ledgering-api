@@ -42,8 +42,7 @@ public class UdpClient {
 
 		// // set socket and dtls config
 		WolfSSL.loadLibrary();
-		WolfSSL sslLib = new WolfSSL();
-		sslLib.debuggingON();
+		WolfSSL.debuggingOFF();
 		WolfSSLContext sslCtx = new WolfSSLContext(WolfSSL.DTLSv1_2_ClientMethod());
 		/* load certificate/key files */
 		int ret = sslCtx.useCertificateFile("crypto/client.pem", WolfSSL.SSL_FILETYPE_PEM);
@@ -64,7 +63,7 @@ public class UdpClient {
 			System.exit(1);
 		}
 		// do not verify certificates with a CA
-		sslCtx.setVerify(WolfSSL.SSL_VERIFY_PEER, null);
+		sslCtx.setVerify(WolfSSL.SSL_VERIFY_NONE, null);
 
 		// set dtls callbacks
 		sslCtx.setIORecv(new DTLSClientRecvCallback());
@@ -100,7 +99,7 @@ public class UdpClient {
 		ret = ssl.connect();
 		if (ret != WolfSSL.SSL_SUCCESS) {
 			int err = ssl.getError(ret);
-			String errString = sslLib.getErrorString(err);
+			String errString = WolfSSL.getErrorString(err);
 			System.out.println("wolfSSL_connect failed. err = " + err + ", " + errString);
 			System.exit(1);
 		}

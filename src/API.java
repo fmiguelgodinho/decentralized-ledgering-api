@@ -148,7 +148,7 @@ public class API {
             System.out.println("failed to load CA certificates!");
             System.exit(1);
         }
-		sslCtx.setVerify(WolfSSL.SSL_VERIFY_PEER, null);
+		sslCtx.setVerify(WolfSSL.SSL_VERIFY_NONE, null);
 
 		// set dtls callbacks
 		sslCtx.setIORecv(new DTLSRecvCallback());
