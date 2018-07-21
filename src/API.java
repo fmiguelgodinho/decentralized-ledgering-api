@@ -20,12 +20,11 @@ import static spark.Spark.threadPool;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.io.UnsupportedEncodingException;
 import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.security.Security;
 import java.security.cert.X509Certificate;
-import java.util.ArrayList;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
 import java.util.Base64;
 import java.util.List;
 
@@ -33,20 +32,21 @@ import org.apache.commons.configuration2.Configuration;
 import org.apache.commons.configuration2.builder.fluent.Configurations;
 import org.apache.commons.configuration2.ex.ConfigurationException;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
-import org.hyperledger.fabric_ca.sdk.exception.InvalidArgumentException;
 
-import com.google.protobuf.ByteString;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.mongodb.MongoClient;
 import com.mongodb.MongoClientURI;
 
 import core.ContractInterpreter;
+import core.Dispatcher;
 import core.dto.ChaincodeResult;
 import core.dto.Contract;
-import integration.Dispatcher;
 import spark.Request;
 import spark.Response;
 import util.NodeConnection;
-import util.Pair;
 
 public class API {
 	
@@ -61,7 +61,8 @@ public class API {
 		new NodeConnection(NodeConnection.PEER_TYPE, "peer0.blockchain-d.com", "localhost", 9051, "../../bootstrap/crypto-config/peerOrganizations/blockchain-d.com/tlsca/tlsca.blockchain-d.com-cert.pem"),
 		new NodeConnection(NodeConnection.PEER_TYPE, "peer0.blockchain-e.com", "localhost", 11051, "../../bootstrap/crypto-config/peerOrganizations/blockchain-e.com/tlsca/tlsca.blockchain-e.com-cert.pem"),
 		new NodeConnection(NodeConnection.PEER_TYPE, "peer0.blockchain-f.com", "localhost", 12051, "../../bootstrap/crypto-config/peerOrganizations/blockchain-f.com/tlsca/tlsca.blockchain-f.com-cert.pem"),
-		new NodeConnection(NodeConnection.ORDERER_TYPE, "orderer0.consensus.com", "localhost", 7050, "../../bootstrap/crypto-config/ordererOrganizations/consensus.com/tlsca/tlsca.consensus.com-cert.pem")
+		new NodeConnection(NodeConnection.ORDERER_TYPE, "orderer0.consensus.com", "localhost", 7050, "../../bootstrap/crypto-config/ordererOrganizations/consensus.com/tlsca/tlsca.consensus.com-cert.pem"),
+		new NodeConnection(NodeConnection.ORDERER_TYPE, "orderer1.consensus.com", "localhost", 8050, "../../bootstrap/crypto-config/ordererOrganizations/consensus.com/tlsca/tlsca.consensus.com-cert.pem")
 	};
 	
 	private static Configuration cfg;
@@ -131,15 +132,6 @@ public class API {
 //        ObjectMapper jsonMapper = new ObjectMapper();
         // setup routing		
         path("/api", () -> {
-//        	before((req, rsp) -> {
-//        	    boolean authenticated;
-//        	    // ... check if authenticated
-//        	    if (!authenticated) {
-//        	        halt(401, "You are not welcome here");
-//        	    }
-//        		// log something
-//        		log....
-//        	});
         	
         	get("/", (request, response) -> "Blockchain-supported Ledgering API for Decentralized Applications - v1.0");
 
@@ -147,117 +139,12 @@ public class API {
                 
                 path("/contract", () -> {
                 
-	                // get contract specification
-	                get("/:cid", (req, rsp) -> getContract(req, rsp));
-	                post("/:cid/sign", (req, rsp) -> {
-
-	                	String channel = req.params(":channel");
-	                	String cid = req.params(":cid");
-	                	Pair<Boolean,Exception> result = postContractSign(req, rsp);
-	                	
-	                	if (result.getRight() != null || !result.getLeft()) {
-
-                	    	rsp.status(500);
-//	                		if (shouldReturnHtml(req)) {
-	                			// return html
-	                	    	rsp.type("text/html");
-	                    		return body().with(
-	                				h3("Error signing!"),
-	                    			div(result.getRight().getMessage()) // TODO: messages aren't descriptive. some exceptions just reutrn null pointer
-	                    		).render();
-//	                		} else {
-//	                			// return json
-//	                	    	rsp.type("application/json");
-//	                			JsonNode root = jsonMapper.createObjectNode();
-//	                			((ObjectNode) root).put("status", 500);
-//	                			JsonNode root
-//	                			((ObjectNode) root).put("response", result.getRight().getMessage());
-//	                			return jsonMapper.writerWithDefaultPrettyPrinter().writeValueAsString(root);
-//	                		}
-
-	                	}
-	                	
-	                	rsp.redirect("/api/" + channel + "/contract/" + cid);
-	                	return null;
-	                });
-	                
-	                // query contract
-	                get("/:cid/query", (req, rsp) -> getQueryOperation(req, rsp));
-	                post("/:cid/query", (req, rsp) -> {
-	                	
-	                	Pair<ChaincodeResult,Exception> result = postQueryOperation(req, rsp);
-	                	
-	                	if (result.getRight() != null) {
-                	    	rsp.status(400);
-                	    	rsp.type("text/html");
-                    		return body().with(
-                				h3("Invocation result: FAIL"),
-                    			div(result.getRight().getMessage()),
-                    			div(result.getRight().getCause() != null? result.getRight().getCause().getMessage() : "")
-                    		).render();
-	                	}
-	                	
-	                	if (result.getLeft() == null || result.getLeft().getStatus() == ChaincodeResult.CHAINCODE_FAILURE) {
-                	    	rsp.status(500);
-                	    	rsp.type("text/html");
-                    		return body().with(
-                    			h3("Query result: FAIL"),
-                    			div("Couldn't execute query!")
-                    		).render();
-	                	}
-
-	                	rsp.status(200);
-	                	rsp.type("text/html");
-	                	return body().with(
-	                			h3("Query result: OK"),
-	                			div("Response: " + result.getLeft().getContent())
-	                	).render();
-	                });
-	                
-	                // invoke contract operation
-	                get("/:cid/invoke", (req, rsp) -> getInvokeOperation(req, rsp));
-	                post("/:cid/invoke", (req, rsp) -> {
-	                	
-	                	Pair<ChaincodeResult,Exception> result = postInvokeOperation(req, rsp);
-	                	
-	                	if (result.getRight() != null) {
-                	    	rsp.status(400);
-                	    	rsp.type("text/html");
-                    		return body().with(
-                				h3("Invocation result: FAIL"),
-                    			div(result.getRight().getMessage()),
-                    			div(result.getRight().getCause() != null? result.getRight().getCause().getMessage() : "")
-                    		).render();
-	                	}
-
-	                	if (result.getLeft() == null || result.getLeft().getStatus() == ChaincodeResult.CHAINCODE_FAILURE) {
-                	    	rsp.status(500);
-                	    	rsp.type("text/html");
-                    		return body().with(
-                				h3("Invocation result: FAIL"),
-                    			div("Couldn't execute invocation!")
-                    		).render();
-	                	}
-	                	
-	                	List<ByteString> signatures = result.getLeft().getSignatures();
-	                	List<String> sigResult = new ArrayList<String>();
-	                	for (ByteString sig : signatures) {
-	                		byte[] b64sig = Base64.getEncoder().encode(sig.toByteArray());
-	                		sigResult.add(new String(b64sig));
-	                	}
-	                	
-	                	rsp.status(200);
-	                	rsp.type("text/html");
-	                	return body().with(
-	                			h3("Invocation result: OK"),
-	                			div("Timestamp: " + result.getLeft().getTimestamp().toString()),
-	                			div("Peer endorsement signature(s): "),
-	                			br(),
-	                			each(sigResult, sig -> div(
-                					sig
-	                			).with(br(), br()))
-	                	).render();
-	                });
+	                get("/:cid", (req, rsp) -> getContract(req, rsp));					// HTML/JSON
+	                post("/:cid/sign", (req, rsp) -> postContractSign(req, rsp));		// HTML/JSON
+	                get("/:cid/query", (req, rsp) -> getQueryOperation(req, rsp));		// HTML only
+	                get("/:cid/invoke", (req, rsp) -> getInvokeOperation(req, rsp));	// HTML only
+	                post("/:cid/query", (req, rsp) -> postQueryOperation(req, rsp));	// HTML/JSON
+	                post("/:cid/invoke", (req, rsp) -> postInvokeOperation(req, rsp));  // HTML/JSON
                 });
             });
         });
@@ -267,122 +154,134 @@ public class API {
 
 	private static String getContract(Request req, Response rsp) {
 		
+
 		// parse parameters
 		String channel = req.params(":channel");
     	String cid = req.params(":cid");
     	
-    	// delegate get contract to interpreter
-    	Contract contract = null;
+
 		try {
-			contract = ci.getContract(channel, cid, extractClientCrt(req));
-		} catch (Exception e) {
-    		rsp.status(404);
-    		rsp.type("text/html");
-    		return body().with(
-    			h3("Couldn't find the contract you specified!"),
-    			div().with(
-    				p("Make sure you've typed its ID correctly and that it exists."),
-    				p(e.getMessage())
-    			)
-    		).render();
-		}
-    	
-		
-		// produce an hash of the contract
-    	String contractHash = null;
-		try {
+			// delegate get contract to interpreter
+			Contract contract = ci.getContract(channel, cid, extractClientCrt(req));
+
+			// produce an hash of the contract
 			MessageDigest md = MessageDigest.getInstance("SHA-256");
 			md.update(contract.getRawRepresentation().getBytes());
-			contractHash = new String(Base64.getEncoder().encode(md.digest()));
-		} catch (NoSuchAlgorithmException e) {
-			e.printStackTrace();
-		}
-    	
+			final String contractHash = new String(Base64.getEncoder().encode(md.digest()));
 
-		// return html
-    	rsp.status(200);
-    	rsp.type("text/html");
-		return body().with(
-		    h3("Contract ID: " + cid),
-		    div().with(
-		    	p("Below is all metadata related with the contract:")
-		    ),
-		    pre(contract.getPrettyPrintRepresentation()),
-		    br(),
-    		contract.getSignature() != null && !contract.getSignature().isEmpty()?
-    				div("SIGNED").withStyle("color:green") :
-					div("NOT SIGNED").withStyle("color:red"), 
-		    				
-			contract.getSignature() != null && !contract.getSignature().isEmpty()?
-		    		div("Contract is signed. Below is the SHA256 hash of the contract and your signature."):
-		    		div("Please sign the below SHA256 hash of the contract with your private key (using openssl or an utility), copy the signature to the field below (in base64 format) and press accept if you agree with the contract."),
-		    br(),
-		    form()
-	    	.withMethod("POST")
-	    	.withAction(cid + "/sign")
-	    	.withId("signContractForm")
-	    	.with(
-	    		div(
-	    			textarea(contractHash)
-			    	.attr("rows", 4)
-			    	.attr("cols", 100)
-			    	.attr("readonly")
-		    	),
-	    		div(
-	    			textarea(contract.getSignature() != null && !contract.getSignature().isEmpty()? contract.getSignature() : "")
-			    	.attr("form", "signContractForm")
-			    	.attr("rows", 10)
-			    	.attr("cols", 100)
-			    	.withId("signature")
-			    	.withName("signature")
-			    	.withPlaceholder(
-			    			"Paste your signature here."
+
+	    	rsp.status(200);
+			if (shouldReturnHtml(req)) {
+				
+				// return html
+		    	rsp.type("text/html");
+				return body().with(
+				    h3("Contract ID: " + cid),
+				    div().with(
+				    	p("Below is all metadata related with the contract:")
+				    ),
+				    pre(contract.getPrettyPrintRepresentation()),
+				    br(),
+		    		contract.getSignature() != null && !contract.getSignature().isEmpty()?
+		    				div("SIGNED").withStyle("color:green") :
+							div("NOT SIGNED").withStyle("color:red"), 
+				    				
+					contract.getSignature() != null && !contract.getSignature().isEmpty()?
+				    		div("Contract is signed. Below is the SHA256 hash of the contract and your signature."):
+				    		div("Please sign the below SHA256 hash of the contract with your private key (using openssl or an utility), copy the signature to the field below (in base64 format) and press accept if you agree with the contract."),
+				    br(),
+				    form()
+			    	.withMethod("POST")
+			    	.withAction(cid + "/sign")
+			    	.withId("signContractForm")
+			    	.with(
+			    		div(
+			    			textarea(contractHash)
+					    	.attr("rows", 4)
+					    	.attr("cols", 100)
+					    	.attr("readonly")
+				    	),
+			    		div(
+			    			textarea(contract.getSignature() != null && !contract.getSignature().isEmpty()? contract.getSignature() : "")
+					    	.attr("form", "signContractForm")
+					    	.attr("rows", 10)
+					    	.attr("cols", 100)
+					    	.withId("signature")
+					    	.withName("signature")
+					    	.withPlaceholder(
+					    			"Paste your signature here."
+					    	)
+					    	.isRequired()
+			    		),
+			    		div().with(
+				    		span().with(
+				    				
+				    			button("Accept & sign")
+				    			.withType("submit")
+				    			.withCondHidden(contract.getSignature() != null && !contract.getSignature().isEmpty()),
+				    			
+				    			button("Reject")
+				    			.withType("cancel")
+				    			.withCondHidden(contract.getSignature() != null && !contract.getSignature().isEmpty())
+						    )
+			    		)
 			    	)
-			    	.isRequired()
-	    		),
-	    		div().with(
-		    		span().with(
-		    				
-		    			button("Accept & sign")
-		    			.withType("submit")
-		    			.withCondHidden(contract.getSignature() != null && !contract.getSignature().isEmpty()),
-		    			
-		    			button("Reject")
-		    			.withType("cancel")
-		    			.withCondHidden(contract.getSignature() != null && !contract.getSignature().isEmpty())
-				    )
-	    		)
-	    	)
-		).render();
+				).render();
+			} else {
+
+				// create json payload
+		    	rsp.type("application/json");
+				ObjectMapper om = new ObjectMapper();
+				ObjectNode jsonResult = om.createObjectNode();
+				jsonResult.put("contract", contract.getRawRepresentation());
+				jsonResult.put("is-signed", contract.getSignature() != null && !contract.getSignature().isEmpty());
+				jsonResult.put("hash", contractHash);
+				return om.writer().writeValueAsString(jsonResult);
+			}
+			
+
+		} catch (Exception e) {
+			return throwError(req, rsp, e);
+		}
 	}
 	
-	private static X509Certificate extractClientCrt(Request req) {
-		X509Certificate[] crtList = (X509Certificate[]) req.raw().getAttribute("javax.servlet.request.X509Certificate");
-		return crtList[0];
-	}
-	
-	private static Pair<Boolean,Exception> postContractSign(Request req, Response rsp) throws UnsupportedEncodingException {
-		
-		Exception exc = null;
-		
+
+
+	private static String postContractSign(Request req, Response rsp) {
+
+		// get params
 		String channel = req.params(":channel");
 		String cid = req.params(":cid");
     	String clientSig = req.queryParams("signature");
-    	boolean result = false;
-	
-		// get client crt first
+		
     	try {
-    		result = ci.signContract(channel, cid, extractClientCrt(req), clientSig);
+    		
+    		// get client crt first
+    		boolean result = ci.signContract(channel, cid, extractClientCrt(req), clientSig);
+    		
+    		rsp.status(200);
+    		if (shouldReturnHtml(req)) {
+
+    			// if html just redirect to the contract and obtain it again,
+    			// the confirmation will be there
+    	    	rsp.type("text/html");
+    	    	rsp.redirect("/api/" + channel + "/contract/" + cid);
+    		} else {
+    	    	rsp.type("application/json");
+				ObjectMapper om = new ObjectMapper();
+				ObjectNode jsonResult = om.createObjectNode();
+				jsonResult.put("result", result);
+				return om.writer().writeValueAsString(jsonResult);
+    		}
+    		
 		} catch (Exception e) {
-			exc = e;
+			return throwError(req, rsp, e);
 		}
-        	
-		return new Pair<Boolean,Exception>(result,exc);
+    	return null;
 	}
 	
 	private static String getQueryOperation(Request req, Response rsp) {
 		
-		String channel = req.params(":channel");
 		String cid = req.params(":cid");
 		// execute action
 		
@@ -430,7 +329,6 @@ public class API {
 	
 	private static String getInvokeOperation(Request req, Response rsp) {
 		
-		String channel = req.params(":channel");
 		String cid = req.params(":cid");
 		// execute action
 		
@@ -479,49 +377,130 @@ public class API {
 		).render();
 	}
 	
-	private static Pair<ChaincodeResult,Exception> postQueryOperation(Request req, Response rsp) {
+	private static String postQueryOperation(Request req, Response rsp) {
     	return postOperation(req, rsp, Dispatcher.CHAINCODE_QUERY_OPERATION);
 	}
 	
 	
-	private static Pair<ChaincodeResult,Exception> postInvokeOperation(Request req, Response rsp) {
+	private static String postInvokeOperation(Request req, Response rsp) {
     	return postOperation(req, rsp, Dispatcher.CHAINCODE_INVOKE_OPERATION);
 	}
 	
-	private static Pair<ChaincodeResult,Exception> postOperation(Request req, Response rsp, int type) {
+	private static String postOperation(Request req, Response rsp, int type) {
 		
-		Exception exc = null;
-		
+		// get params
 		String channel = req.params(":channel");
     	String cid = req.params(":cid");
     	String oid = req.queryParams("operationId");
     	String oargs = req.queryParams("operationArgs");
     	
-    	ChaincodeResult result = null;
-    	// dynamically using logic of contract
-    	// 280f06d6-2c1d-48fc-a5ba-3bfacc42ba08 | { "foo": 123, "bar": "abc" }
-    	
-    	String[] args = oargs.split("\\|");
-    	for (int i = 0; i < args.length; i++) {
-    		args[i] = args[i].trim();
-    	}
-    	
+
 		try {
-	    	if (args.length == 0)
-	    		throw new InvalidArgumentException("No arguments were able to be parsed! Please validate your input!");
-	    	
-	    	result = ci.verifyAndExecuteContract(type, channel, cid, oid, extractClientCrt(req), args);
-	    	
-		} catch (Exception e) {
-			exc = e;
-		} 
     	
-    	return new Pair<ChaincodeResult,Exception>(result, exc);
+			// get the json arguments in array form
+			ObjectMapper om = new ObjectMapper();
+			String[] args = new String[] {};
+			if (oargs != null && !oargs.isEmpty()) {
+				args = om.readValue(oargs, String[].class);
+			}
+			
+	
+			
+			// execute the function
+			ChaincodeResult result = ci.verifyAndExecuteContract(type, channel, cid, oid, extractClientCrt(req), args);
+			// check for chain code failure
+			if (result == null || result.getStatus() == ChaincodeResult.CHAINCODE_FAILURE) {
+
+				return throwError(req, rsp, new Exception("Chaincode failure when performing " + (type == Dispatcher.CHAINCODE_QUERY_OPERATION ? "query" : "invocation")));
+			}
+			
+			// parse signatures and put them into a usable format
+			List<String> signatures = result.getSignatures();
+			DateFormat df = new SimpleDateFormat("dd/MM/yyyy HH:mm:ss");
+			String timestamp = null;
+			if (result.getTimestamp() != null) {
+				timestamp = df.format(result.getTimestamp());
+			}
+			
+
+        	rsp.status(200);
+			if (shouldReturnHtml(req)) {
+
+            	rsp.type("text/html");
+            	return body().with(
+            			h3((type == Dispatcher.CHAINCODE_QUERY_OPERATION ? "Query" : "Invocation") + "result: OK"),
+            			timestamp != null? div("Timestamp: " + timestamp) : div(),
+            			div("Peer endorsement signature(s): "),
+            			br(),
+            			each(signatures, sig -> div(
+        					Base64.getEncoder().encodeToString(sig.getBytes())
+            			).with(br(), br()))
+            	).render();
+	        	
+			} else {
+
+				// put arrays into json array and finalize object
+            	rsp.type("application/json");
+				ArrayNode jsonArray = om.valueToTree(signatures);
+				ObjectNode jsonResult = om.createObjectNode();
+				jsonResult.putArray("signatures").addAll(jsonArray);
+
+				switch (type) {
+					case Dispatcher.CHAINCODE_INVOKE_OPERATION:
+						// invoke just needs timestamp for transaction confirmal
+						jsonResult.put("timestamp", timestamp);
+						break;
+			
+					case Dispatcher.CHAINCODE_QUERY_OPERATION:
+						// query needs query results
+						jsonResult.put("result", result.getContent());
+						break;
+				}
+				return om.writer().writeValueAsString(jsonResult);
+			}
+		} catch (Exception e) {
+			return throwError(req, rsp, e);
+		}
 	}
+	
+	/** AUX FUNCTIONS **/
 		
 	private static boolean shouldReturnHtml(Request request) {
 	    String accept = request.headers("Accept");
 	    return accept != null && accept.contains("text/html");
+	}
+	
+
+	private static X509Certificate extractClientCrt(Request req) {
+		X509Certificate[] crtList = (X509Certificate[]) req.raw().getAttribute("javax.servlet.request.X509Certificate");
+		return crtList[0];
+	}
+	
+	private static String throwError(Request req, Response rsp, Exception e)  {
+		
+		try { 
+
+		// error handler
+    	rsp.status(500);
+		if (shouldReturnHtml(req)) {
+			rsp.type("text/html");
+			return body().with(
+				    h3("API error while executing operation!"),
+				    div().with(
+				    	p(e.toString())
+				    )
+			).render();
+		} else {
+			rsp.type("application/json");
+			ObjectMapper om = new ObjectMapper();
+			ObjectNode jsonResult = om.createObjectNode();
+			jsonResult.put("error", e.toString());
+			return om.writer().writeValueAsString(jsonResult);
+		}
+		} catch (JsonProcessingException jpe) {
+			e.printStackTrace();
+		}
+		return null;
 	}
 
 

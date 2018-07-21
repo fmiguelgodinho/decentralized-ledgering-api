@@ -33,7 +33,6 @@ import core.dto.ChaincodeResult;
 import core.dto.Contract;
 import core.exception.InvalidContractPropertyException;
 import core.exception.NonConformantContractException;
-import integration.Dispatcher;
 
 public class ContractInterpreter {
 		

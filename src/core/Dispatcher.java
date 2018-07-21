@@ -1,4 +1,4 @@
-package integration;
+package core;
 
 import java.io.File;
 import java.nio.file.Paths;
@@ -35,6 +35,7 @@ import org.hyperledger.fabric.sdk.security.CryptoSuite;
 import com.google.protobuf.ByteString;
 
 import core.dto.ChaincodeResult;
+import core.dto.HLFUser;
 import util.NodeConnection;
 
 public class Dispatcher {
@@ -219,10 +220,12 @@ public class Dispatcher {
         
         // parse responses
         String responseString = null;
+        List<ByteString> signatureStrings = new ArrayList<ByteString>(responses.size());
         for (ProposalResponse rsp : responses) {
         	// if valid (OBS: ISVERIFIED IS BROKEN ON PURPOSE, IT WILL ALWAYS RETURN TRUE. VALIDATION WILL OCCUR DIRECTLY HERE)
         	if (rsp.isVerified() && rsp.getStatus() == ProposalResponse.Status.SUCCESS) {
         		responseString = rsp.getProposalResponse().getResponse().getPayload().toStringUtf8();
+        		signatureStrings.add(rsp.getProposalResponse().getEndorsement().getSignature());
         		successful.add(rsp);
         	} else {
         		failed.add(rsp);
@@ -238,7 +241,7 @@ public class Dispatcher {
         }
         
         
-        return new ChaincodeResult(ChaincodeResult.CHAINCODE_SUCCESS, responseString);
+        return new ChaincodeResult(ChaincodeResult.CHAINCODE_SUCCESS, responseString, signatureStrings);
     }
     
     private ChaincodeResult invoke(Channel channel, String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws ProposalException, InvalidArgumentException, InterruptedException, ExecutionException, TimeoutException {
