@@ -309,14 +309,14 @@ public class API {
 				    	br(),
 				    	
 				    	// transaction / data details
-				    	div("Arguments to be fed to the function (separate arguments by a '|'): "),
+				    	div("Arguments to be fed to the function (in JSON array format): "),
 				    	textarea()
 				    	.attr("form", "queryOperationForm")
 				    	.attr("rows", 20)
 				    	.attr("cols", 70)
 				    	.withId("operationArgs")
 				    	.withName("operationArgs")
-				    	.withPlaceholder("e.g. \n\n64-44-KL"),
+				    	.withPlaceholder("e.g. \n\n[\"64-44-KL\"]"),
 				    	
 				    	// submit
 				    	br(),
@@ -356,17 +356,17 @@ public class API {
 				    	br(),
 				    	
 				    	// transaction / data details
-				    	div("Arguments to be fed to the function (separate arguments by a '|'): "),
+				    	div("Arguments to be fed to the function (in JSON array format): "),
 				    	textarea()
 				    	.attr("form", "invokeOperationForm")
 				    	.attr("rows", 20)
 				    	.attr("cols", 70)
 				    	.withId("operationArgs")
 				    	.withName("operationArgs")
-				    	.withPlaceholder("e.g. \n\n39128340614;\nexample-string;\n{\n\tbrand: 'Fiat',\n\tmodel: '500', \n\tunits: 1"
-				    			+ "\n\tcar-id: ['u8d923-da8313-28mc3-km093i'], \n\tpayment-details: {\n\t\tamount-to-be-payed: '30000',"
-				    			+ "\n\t\tcurrency: 'euro', \n\t\tamount-paying: '30000', \n\t\tpayment-method: 'credit-card',"
-				    			+ "\n\t\tpayment-policy: '100%'\n\t}\n}"),
+				    	.withPlaceholder("e.g. \n\n[\n\t\"39128340614\",\n\t\"example-string\",\n\t\"{\n\t\tbrand: 'Fiat',\n\t\tmodel: '500', \n\t\tunits: 1"
+				    			+ "\n\t\tcar-id: ['u8d923-da8313-28mc3-km093i'], \n\t\tpayment-details: {\n\t\t\tamount-to-be-payed: '30000',"
+				    			+ "\n\t\t\tcurrency: 'euro', \n\t\t\tamount-paying: '30000', \n\t\t\tpayment-method: 'credit-card',"
+				    			+ "\n\t\t\tpayment-policy: '100%'\n\t\t}\n\t}\"\n]"),
 				    	
 				    	// submit
 				    	br(),
@@ -421,15 +421,15 @@ public class API {
 			if (result.getTimestamp() != null) {
 				timestamp = df.format(result.getTimestamp());
 			}
-			
 
         	rsp.status(200);
 			if (shouldReturnHtml(req)) {
 
             	rsp.type("text/html");
             	return body().with(
-            			h3((type == Dispatcher.CHAINCODE_QUERY_OPERATION ? "Query" : "Invocation") + "result: OK"),
-            			timestamp != null? div("Timestamp: " + timestamp) : div(),
+            			h3((type == Dispatcher.CHAINCODE_QUERY_OPERATION ? "Query" : "Invocation") + " result: OK"),
+            			type == Dispatcher.CHAINCODE_QUERY_OPERATION ? div() : div("Timestamp: " + timestamp),
+    					type == Dispatcher.CHAINCODE_QUERY_OPERATION ? div("Result: " + result.getContent()) : div(),
             			div("Peer endorsement signature(s): "),
             			br(),
             			each(signatures, sig -> div(
