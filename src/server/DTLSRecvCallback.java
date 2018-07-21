@@ -20,7 +20,7 @@ public class DTLSRecvCallback implements WolfSSLIORecvCallback {
 		DatagramPacket recvPacket;
 
 		try {
-			dtlsTimeout = ssl.dtlsGetCurrentTimeout() * 1000;
+			dtlsTimeout = ssl.dtlsGetCurrentTimeout() * 1500;
 			dsock = ioctx.getDatagramSocket();
 			dsock.setSoTimeout(dtlsTimeout);
 			recvPacket = new DatagramPacket(buf, sz);

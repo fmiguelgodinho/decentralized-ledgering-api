@@ -4,36 +4,24 @@ import java.nio.ByteBuffer;
 
 public class Envelope {
 
-	public static final short ERR = -1;						// ENV: -1|n|channel|n|contract|0|n|payload(error)
+	public static final short ERR = -1;						// ENV: -1|n|channel|n|contract|0|n|payload(error)|0
 	
 	public static final short OP_GET_CONTRACT = 0;			// ENV: 0|n|channel|n|contract|0|0|n|pubkey
-	public static final short OP_SIGN_CONTRACT = 1;			// ENV: 1|n|channel|n|contract|0|n|payload(signature)
-	public static final short OP_QUERY = 2;					// ENV: 2|n|channel|n|contract|n|function|n|payload(args)
-	public static final short OP_INVOKE = 3;				// ENV: 3|n|channel|n|contract|n|function|n|payload(args)
-	public static final short RSP_GET_CONTRACT = 4;			// ENV: 4|n|channel|n|contract|0|n|payload(contract)
-	public static final short RSP_SIGN_CONTRACT = 5;		// ENV: 5|n|channel|n|contract|0|n|payload(confirmation)
-	public static final short RSP_QUERY = 6;				// ENV: 6|n|channel|n|contract|n|function|n|payload(result[query-result])
-	public static final short RSP_INVOKE = 7;				// ENV: 7|n|channel|n|contract|n|function|n|payload(result[t/f], sigs)
+	public static final short OP_SIGN_CONTRACT = 1;			// ENV: 1|n|channel|n|contract|0|n|payload(signature)|n|pubkey
+	public static final short OP_QUERY = 2;					// ENV: 2|n|channel|n|contract|n|function|n|payload(args)|n|pubkey
+	public static final short OP_INVOKE = 3;				// ENV: 3|n|channel|n|contract|n|function|n|payload(args)|n|pubkey
+	public static final short RSP_GET_CONTRACT = 4;			// ENV: 4|n|channel|n|contract|0|n|payload(contract)|0
+	public static final short RSP_SIGN_CONTRACT = 5;		// ENV: 5|n|channel|n|contract|0|n|payload(confirmation)|0
+	public static final short RSP_QUERY = 6;				// ENV: 6|n|channel|n|contract|n|function|n|payload(result[query-result])|0
+	public static final short RSP_INVOKE = 7;				// ENV: 7|n|channel|n|contract|n|function|n|payload(result[t/f], sigs)|0
 	
 	private short operation;
 	private String channelId;
 	private String contractId;
 	private String function;
 	private byte[] payload;
-	
 	private byte[] pubKey;									// public key that can be annexed to the envelope, usually set by a client app
 	
-	public Envelope(short operation, String channelId, String contractId, byte[] pubKey) {
-		this(operation, channelId, contractId, null, null, pubKey);
-	}
-	
-	public Envelope(short operation, String channelId, String contractId, byte[] payload, byte[] pubKey) {
-		this(operation, channelId, contractId, null, payload, pubKey);
-	}
-	
-	public Envelope(short operation, String channelId, String contractId, String function, byte[] pubKey) {
-		this(operation, channelId, contractId, function, null, pubKey);
-	}
 	
 	public Envelope(short operation, String channelId, String contractId, String function, byte[] payload, byte[] pubKey) throws IllegalArgumentException {
 		

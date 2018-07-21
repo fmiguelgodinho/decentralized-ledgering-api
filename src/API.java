@@ -10,8 +10,6 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.NoSuchProviderException;
 import java.security.Security;
-import java.security.cert.CertificateException;
-import java.security.cert.X509Certificate;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.Base64;
@@ -42,7 +40,6 @@ import server.DTLSGenCookieContext;
 import server.DTLSIOContext;
 import server.DTLSRecvCallback;
 import server.DTLSSendCallback;
-import server.DTLSVerifyCallback;
 import server.Envelope;
 import util.NodeConnection;
 
@@ -199,51 +196,53 @@ public class API {
 				System.out.println("wolfSSL_accept failed. err = " + err + ", " + errString);
 				System.exit(1);
 			}
-			
-            /* read client response, and echo */
-			byte[] reqBuffer = new byte[mtu];
-            ret = ssl.read(reqBuffer, reqBuffer.length);
-            // DO SOMETHING WITH RET: VALIDATION
-			
-			try {
-				
-				Envelope recvEnv = Envelope.fromBytes(reqBuffer);
-				Envelope respEnv = null;
-				// parse operation to respond
-				switch (recvEnv.getOpCode()) {
-				case Envelope.OP_GET_CONTRACT:
-					respEnv = getContract(recvEnv);
-					break;
-				case Envelope.OP_SIGN_CONTRACT:
-					respEnv = signContract(recvEnv);
-					break;
-				case Envelope.OP_QUERY:
-					respEnv = queryOperation(recvEnv);
-					break;
-				case Envelope.OP_INVOKE:
-					respEnv = invokeOperation(recvEnv);
-					break;
-				}
 	
-				// create rsp buffer & respond to client
-				byte[] respBuffer = Envelope.toBytes(respEnv);
-				
-	            ret = ssl.write(respBuffer, respBuffer.length);
-	            if (ret != respBuffer.length) {
-	                System.out.println("ssl.write() failed");
-	                System.exit(1);
-	            }
-			} catch (Exception e) {
-				System.err.println(e.toString());
-			} finally {
-			
-				// shutdown ssl and disconnect socket
-	            ssl.shutdownSSL();
-	            ssl.freeSSL();
-	            socket.disconnect();
-	            socket.close();
-			}
+			while (true) {
+				try {
+					/* read client response, and echo */
+					byte[] reqBuffer = new byte[mtu];
+					ret = ssl.read(reqBuffer, reqBuffer.length);
+					if (ret <= 0) {
+						// shutdown ssl and disconnect socket
+						 ssl.shutdownSSL();
+						 ssl.freeSSL();
+						 socket.disconnect();
+						 socket.close();
+						 break;
+					}
+					// DO SOMETHING WITH RET: VALIDATION
 
+
+					Envelope recvEnv = Envelope.fromBytes(reqBuffer);
+					Envelope respEnv = null;
+					// parse operation to respond
+					switch (recvEnv.getOpCode()) {
+					case Envelope.OP_GET_CONTRACT:
+						respEnv = getContract(recvEnv);
+						break;
+					case Envelope.OP_SIGN_CONTRACT:
+						respEnv = signContract(recvEnv);
+						break;
+					case Envelope.OP_QUERY:
+						respEnv = queryOperation(recvEnv);
+						break;
+					case Envelope.OP_INVOKE:
+						respEnv = invokeOperation(recvEnv);
+						break;
+					}
+
+					// create rsp buffer & respond to client
+					byte[] respBuffer = Envelope.toBytes(respEnv);
+
+					ret = ssl.write(respBuffer, respBuffer.length);
+					if (ret != respBuffer.length) {
+						System.out.println("ssl.write() failed");
+						System.exit(1);
+					}
+				} catch (Exception e) {
+					e.printStackTrace();
+				}
+			}
 		}
 	}
 
@@ -274,7 +273,7 @@ public class API {
 			final byte[] payload = om.writer().writeValueAsBytes(jsonResult);
 
 			// create envelope
-			return new Envelope(Envelope.RSP_GET_CONTRACT, channel, cid, payload);
+			return new Envelope(Envelope.RSP_GET_CONTRACT, channel, cid, null, payload, null);
 
 		} catch (Exception e) {
 			return throwErrorEnvelope(e, channel, cid);
@@ -298,7 +297,7 @@ public class API {
 			final byte[] payload = om.writer().writeValueAsBytes(jsonResult);
 
 			// create envelope
-			return new Envelope(Envelope.RSP_SIGN_CONTRACT, channel, cid, payload);
+			return new Envelope(Envelope.RSP_SIGN_CONTRACT, channel, cid, null, payload, null);
 		} catch (Exception e) {
 			return throwErrorEnvelope(e, channel, cid);
 		}
@@ -318,11 +317,16 @@ public class API {
 		String cid = env.getContractId();
 		String oid = env.getFunction();
 		byte[] pubKey = env.getPublicKey();
+		byte[] recvPayload = env.getPayload();
 
 		try {
 			// get the payload arguments
 			ObjectMapper om = new ObjectMapper();
-			String[] oargs = om.readValue(new String(env.getPayload()), String[].class);
+			
+			String[] oargs = new String[] {};
+			if (recvPayload != null && recvPayload.length > 0) {
+				oargs = om.readValue(new String(env.getPayload()), String[].class);
+			}
 
 			// execute the function
 			ChaincodeResult result = ci.verifyAndExecuteContract(type, channel, cid, oid, pubKey, oargs);
@@ -361,7 +365,7 @@ public class API {
 			}
 
 			byte[] payload = om.writer().writeValueAsBytes(jsonResult);
-			return new Envelope(opcode, channel, cid, payload);
+			return new Envelope(opcode, channel, cid, null, payload, null);
 
 		} catch (Exception e) {
 			return throwErrorEnvelope(e, channel, cid);
@@ -378,7 +382,7 @@ public class API {
 			ObjectNode jsonResult = om.createObjectNode();
 			jsonResult.put("error", e.toString().getBytes());
 			byte[] payload = om.writer().writeValueAsBytes(jsonResult);
-			return new Envelope(Envelope.ERR, channel, cid, payload);
+			return new Envelope(Envelope.ERR, channel, cid, null, payload, null);
 
 		} catch (JsonProcessingException jpe) {
 			jpe.printStackTrace();
