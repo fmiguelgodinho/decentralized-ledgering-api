@@ -1,0 +1,3 @@
+clone the repo
+mvn install all needed stuff
+replace mvn fabric-sdk-jar with the one in lib/
