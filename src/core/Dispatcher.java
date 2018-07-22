@@ -312,20 +312,16 @@ public class Dispatcher {
             	// peer name and endpoint in network
 	            Peer peer = client.newPeer(nodesOnChannel[i].name, "grpcs://" + nodesOnChannel[i].host + ":"  + nodesOnChannel[i].port, secPeerProperties);
 	            channel.addPeer(peer);
+	            if (i == 0) {
+	            // eventhub on peer endpoints
+	            EventHub eventHub = client.newEventHub("eventhub0" + i, "grpcs://" + nodesOnChannel[i].host + ":" + nodesOnChannel[i].eventHubPort, secPeerProperties);
+	            channel.addEventHub(eventHub);
+	            }
             } else if (nodesOnChannel[i].type == NodeConnection.ORDERER_TYPE) {
             	// orderer name and endpoint in network
                 Orderer orderer = client.newOrderer(nodesOnChannel[i].name, "grpcs://" + nodesOnChannel[i].host + ":"  + nodesOnChannel[i].port, secPeerProperties);
                 channel.addOrderer(orderer);
             }
-            
-            
-            // TODO: remove this
-            if (i == 0) {
-	            // eventhub name and endpoint in fabcar network
-	            EventHub eventHub = client.newEventHub("eventhub01", "grpcs://localhost:7053", secPeerProperties);
-	            channel.addEventHub(eventHub);
-            }
-            // TODO ENDS HERE
     	}
     	
     	// init channel, finally

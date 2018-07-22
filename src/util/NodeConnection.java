@@ -8,13 +8,15 @@ public class NodeConnection {
 	public String host;
 	public String name;
 	public int port;
+	public int eventHubPort;
 	public String tlsCrtPath;
 	public int type;
 	
-	public NodeConnection(int type, String name, String host, int port, String tlsCrtPath) {
+	public NodeConnection(int type, String name, String host, int port, int eventHubPort, String tlsCrtPath) {
 		this.name = name;
 		this.host = host;
 		this.port = port;
+		this.eventHubPort = eventHubPort;
 		this.tlsCrtPath = tlsCrtPath;
 		this.type = type;
 	}

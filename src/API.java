@@ -90,11 +90,14 @@ public class API {
 		HLF_INTEGRATION_CHANNEL_NODES = new NodeConnection[bootstrapNodes.length];
 		for (int i = 0; i < bootstrapNodes.length; i++) {
 			String cfgNode = bootstrapNodes[i];
+			int nodeType = cfg.getInt("bootstrapNode." + cfgNode + ".type");
 			HLF_INTEGRATION_CHANNEL_NODES[i] = new NodeConnection(
-				cfg.getInt("bootstrapNode." + cfgNode + ".type"),
+				nodeType,
 				cfg.getString("bootstrapNode." + cfgNode + ".name"),
 				cfg.getString("bootstrapNode." + cfgNode + ".host"),
 				cfg.getInt("bootstrapNode." + cfgNode + ".port"),
+				nodeType == NodeConnection.PEER_TYPE ? 
+						cfg.getInt("bootstrapNode." + cfgNode + ".eventHubPort") : -1,
 				cfg.getString("bootstrapNode." + cfgNode + ".caCrtPath")
 			);
 		}
