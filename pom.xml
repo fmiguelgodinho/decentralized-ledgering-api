@@ -29,7 +29,7 @@
 							<archive>
 								<manifest>
 									<mainClass>
-										com.fgodinho.API
+										API
 									</mainClass>
 								</manifest>
 							</archive>
