@@ -147,13 +147,22 @@ public class API {
             path("/:channel", () -> {
                 
                 path("/contract", () -> {
-                
-	                get("/:cid", (req, rsp) -> getContract(req, rsp));					// HTML/JSON
-	                post("/:cid/sign", (req, rsp) -> postContractSign(req, rsp));		// HTML/JSON
-	                get("/:cid/query", (req, rsp) -> getQueryOperation(req, rsp));		// HTML only
-	                get("/:cid/invoke", (req, rsp) -> getInvokeOperation(req, rsp));	// HTML only
-	                post("/:cid/query", (req, rsp) -> postQueryOperation(req, rsp));	// HTML/JSON
-	                post("/:cid/invoke", (req, rsp) -> postInvokeOperation(req, rsp));  // HTML/JSON
+
+	                get("/:cid", "text/html", (req, rsp) -> getContract(req, rsp));
+	                get("/:cid", "application/json", (req, rsp) -> getContract(req, rsp));
+	                
+	                post("/:cid/sign", "text/html", (req, rsp) -> postContractSign(req, rsp));
+	                post("/:cid/sign", "application/json", (req, rsp) -> postContractSign(req, rsp));
+	                
+	                get("/:cid/query", "text/html", (req, rsp) -> getQueryOperation(req, rsp));		// HTML only
+	                
+	                get("/:cid/invoke", "text/html", (req, rsp) -> getInvokeOperation(req, rsp));	// HTML only
+
+	                post("/:cid/query", "text/html", (req, rsp) -> postQueryOperation(req, rsp));
+	                post("/:cid/query", "application/json", (req, rsp) -> postQueryOperation(req, rsp));
+
+	                post("/:cid/invoke", "text/html", (req, rsp) -> postInvokeOperation(req, rsp));  // HTML/JSON
+	                post("/:cid/invoke", "application/json", (req, rsp) -> postInvokeOperation(req, rsp));  // HTML/JSON
                 });
             });
         });
