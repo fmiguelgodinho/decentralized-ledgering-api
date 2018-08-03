@@ -85,11 +85,14 @@ public class API {
 		Security.addProvider(new BouncyCastleProvider());
 		
 		// set up bootstrap nodes
-		
+		String trustedCaPath = cfg.getString("hlf.trustedCasPath");
 		String[] bootstrapNodes = cfg.getStringArray("hlf.bootstrapNodes");
 		HLF_INTEGRATION_BOOTSTRAP_NODES = new NodeConnection[bootstrapNodes.length];
 		for (int i = 0; i < bootstrapNodes.length; i++) {
 			String cfgNode = bootstrapNodes[i];
+			String cfgNodeName = cfg.getString("bootstrapNode." + cfgNode + ".name");
+			String cfgNodeDomain = cfgNodeName.substring(cfgNodeName.indexOf(".")+1);
+			
 			int nodeType = cfg.getInt("bootstrapNode." + cfgNode + ".type");
 			HLF_INTEGRATION_BOOTSTRAP_NODES[i] = new NodeConnection(
 				nodeType,
@@ -98,8 +101,10 @@ public class API {
 				cfg.getInt("bootstrapNode." + cfgNode + ".port"),
 				nodeType == NodeConnection.PEER_TYPE ? 
 						cfg.getInt("bootstrapNode." + cfgNode + ".eventHubPort") : -1,
-				cfg.getString("bootstrapNode." + cfgNode + ".caCrtPath")
+				trustedCaPath + "/tlsca." + cfgNodeDomain + "-cert.pem"
 			);
+			
+
 		}
 		
 	}
