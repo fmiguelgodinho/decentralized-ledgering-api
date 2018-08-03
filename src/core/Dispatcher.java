@@ -49,9 +49,11 @@ public class Dispatcher {
     
     private HFClient client;
     private ConcurrentMap<String, Channel> channels;
+    private ConcurrentMap<String, Collection<Peer>> signers; // per contract
+    private ConcurrentMap<String, Collection<Orderer>> orderers; // per contract
     private Configuration cfg;
     
-    public Dispatcher(Configuration cfg, NodeConnection[] nodesOnChannel) throws Exception {
+    public Dispatcher(Configuration cfg, NodeConnection[] bootstrapNodes) throws Exception {
     	
     	this.cfg = cfg;
     	
@@ -74,9 +76,15 @@ public class Dispatcher {
 
         // init channel map
         channels = new ConcurrentHashMap<String,Channel>();
-        this.setChannel(
+        
+        // init contract nodes maps
+        signers = new ConcurrentHashMap<String, Collection<Peer>>();
+        orderers = new ConcurrentHashMap<String, Collection<Orderer>>();
+        
+        // create the config channel
+        createChannel(
     		cfg.getString("hlf.channelName"),
-    		nodesOnChannel
+    		bootstrapNodes
         );
     }
     
@@ -123,79 +131,111 @@ public class Dispatcher {
     	
     }
     
-    public void setChannel(String newChannelName, NodeConnection[] nodesOnChannel) throws InvalidArgumentException, TransactionException {
+    public void updateChannelForContract(String channelName, String contractId, NodeConnection[] newNodesOnChannel) throws InvalidArgumentException, TransactionException {
+    	
+    	// get channel to update and its nodes
+    	Channel oldChannel = channels.get(channelName);
+    	Collection<Peer> existingPeers = oldChannel.getPeers();
+    	Collection<Orderer> existingOrderers = oldChannel.getOrderers();
+    	// remove it
+    	channels.remove(channelName);
+    	oldChannel.shutdown(true);
+    	
+    	// clear any old refs to signers and orderers we might have
+    	signers.remove(contractId);
+    	orderers.remove(contractId);
+
+		// create channel and add nodes nodes
+    	Channel channel = client.newChannel(channelName);
+    	
+    	// add existing nodes to new channel (these will be the bootstrap nodes typically
+    	List<String> oldNodeNames = new ArrayList<String>(existingOrderers.size() + existingPeers.size());
+    	for (Peer oldPeer : existingPeers) {
+    		channel.addPeer(oldPeer);
+    	}
+    	for (Orderer oldOrderer : existingOrderers) {
+    		channel.addOrderer(oldOrderer);
+    	}
+    	
+    	// add new nodes
+    	for (int i = 0; i < newNodesOnChannel.length; i++) {
+    		
+    		// if the peer already exists, ignore its addition
+    		if (oldNodeNames.contains(newNodesOnChannel[i].name))
+    			continue;
+    		
+    		File tlsCrt = Paths.get(newNodesOnChannel[i].tlsCrtPath).toFile();
+            
+            if (!tlsCrt.exists())
+            	throw new RuntimeException("Missing TLS cert files");
+            
+            Properties secPeerProperties = new Properties();
+            secPeerProperties.setProperty("hostnameOverride", newNodesOnChannel[i].name);
+            secPeerProperties.setProperty("sslProvider", cfg.getString("hlf.communication.sslProvider"));
+            secPeerProperties.setProperty("negotiationType", cfg.getString("hlf.communication.negotiationMode"));
+            secPeerProperties.setProperty("pemFile", tlsCrt.getAbsolutePath());
+            
+            if (newNodesOnChannel[i].type == NodeConnection.PEER_TYPE) {
+            	// peer name and endpoint in network
+	            Peer peer = client.newPeer(newNodesOnChannel[i].name, "grpcs://" + newNodesOnChannel[i].host + ":"  + newNodesOnChannel[i].port, secPeerProperties);
+	            channel.addPeer(peer);
+            } else if (newNodesOnChannel[i].type == NodeConnection.ORDERER_TYPE) {
+            	// orderer name and endpoint in network
+                Orderer orderer = client.newOrderer(newNodesOnChannel[i].name, "grpcs://" + newNodesOnChannel[i].host + ":"  + newNodesOnChannel[i].port, secPeerProperties);
+                channel.addOrderer(orderer);
+            }
+    	}
+
+    	
+    	// init channel, finally
+        channel.initialize();
+        channels.put(channelName, channel);
+    }
+    
+    private void createChannel(String newChannelName, NodeConnection[] nodesOnChannel) throws InvalidArgumentException, TransactionException {
     	
     	Channel existingChannelCfg = channels.get(newChannelName);
     	
-    	// if channel does not exist, initialize new channel on the client side
-    	if (existingChannelCfg == null) {
-        	Channel newChannel = initChannel(newChannelName, nodesOnChannel);
-            channels.put(newChannelName, newChannel);
-    	} 
+    	// if channel does exist, remove it in order to initialize new channel on the client side
+    	if (existingChannelCfg != null) {
+    		channels.remove(newChannelName);
+    	}
+        	
+		// create channel and add nodes nodes
+    	Channel channel = client.newChannel(newChannelName);
+    	
+    	for (int i = 0; i < nodesOnChannel.length; i++) {
+    		File tlsCrt = Paths.get(nodesOnChannel[i].tlsCrtPath).toFile();
+            
+            if (!tlsCrt.exists())
+            	throw new RuntimeException("Missing TLS cert files");
+            
+            Properties secPeerProperties = new Properties();
+            secPeerProperties.setProperty("hostnameOverride", nodesOnChannel[i].name);
+            secPeerProperties.setProperty("sslProvider", cfg.getString("hlf.communication.sslProvider"));
+            secPeerProperties.setProperty("negotiationType", cfg.getString("hlf.communication.negotiationMode"));
+            secPeerProperties.setProperty("pemFile", tlsCrt.getAbsolutePath());
+            
+            if (nodesOnChannel[i].type == NodeConnection.PEER_TYPE) {
+            	// peer name and endpoint in network
+	            Peer peer = client.newPeer(nodesOnChannel[i].name, "grpcs://" + nodesOnChannel[i].host + ":"  + nodesOnChannel[i].port, secPeerProperties);
+	            channel.addPeer(peer);
+	            if (i == 0) {
+	            	// eventhub on peer endpoints
+	            	EventHub eventHub = client.newEventHub("eventhub0" + i, "grpcs://" + nodesOnChannel[i].host + ":" + nodesOnChannel[i].eventHubPort, secPeerProperties);
+	            	channel.addEventHub(eventHub);
+	            }
+            } else if (nodesOnChannel[i].type == NodeConnection.ORDERER_TYPE) {
+            	// orderer name and endpoint in network
+                Orderer orderer = client.newOrderer(nodesOnChannel[i].name, "grpcs://" + nodesOnChannel[i].host + ":"  + nodesOnChannel[i].port, secPeerProperties);
+                channel.addOrderer(orderer);
+            }
+    	}
+    	
+    	// init channel, finally
+        channel.initialize();
+        channels.put(newChannelName, channel);
     }
-    
-//    // has to be admin
-//    public void install(String chaincodeId, String chaincodeVersion, File chaincodeSourceFolder, String chaincodeRelativePath, String[] chaincodeArgs, Contract ecp) throws InvalidArgumentException, IOException, ProposalException {
-//    	
-//    	Collection<ProposalResponse> successful = new LinkedList<ProposalResponse>();
-//    	Collection<ProposalResponse> failed = new LinkedList<ProposalResponse>();
-//    	
-//    	String channelToInstall = ecp.getContractStringAttr("channel");
-//    	
-//        // get channel instance from client
-//        Channel channel = channels.get(channelToInstall);
-//        
-//        // create install proposal request
-//    	InstallProposalRequest ipr = client.newInstallProposalRequest();
-//    	
-//        // build cc id providing the chaincode name
-//        ChaincodeID CCId = ChaincodeID.newBuilder().setName(chaincodeId).build();
-//        ipr.setChaincodeID(CCId);
-//        ipr.setChaincodeVersion(chaincodeVersion);
-//        // set chaincode folder absolute path and then the chaincode source folder location
-//        ipr.setChaincodeSourceLocation(chaincodeSourceFolder);
-//        ipr.setChaincodePath(chaincodeRelativePath);
-//        ipr.setChaincodeLanguage(Type.GO_LANG);
-//        
-////        TODO path on docker, and policy based on interpretation
-////        ipr.setChaincodeEndorsementPolicy(policy);
-//        
-//        List<String> peersToInstall = ecp.getContractListAttr("installed-on-nodes");
-//        List<Peer> peersOnChannel = new ArrayList<Peer>(channel.getPeers());
-//        for (Peer p: peersOnChannel) {
-//        	if (!peersToInstall.contains(p.getName()))
-//        		peersOnChannel.remove(p);
-//        }
-////        for (Peer p : peers) {
-////            HLFUser appUser = getUser(
-////            		cfg.getString("hlf.client.crtPath"), 
-////            		cfg.getString("hlf.client.keyPath"),
-////                	cfg.getString("hlf.client.username"), 
-////                	cfg.getString("hlf.client.mspid"), 
-////                	cfg.getString("hlf.client.org")
-////                 );
-////        }
-//        // TODO: MAYBE SEND ONLY TO PEERS WHO IS ADMIN FOR
-//        Collection<ProposalResponse> res = client.sendInstallProposal(ipr, peersOnChannel);
-//
-//        for (ProposalResponse pres : res) {
-//            if (pres.getStatus() == ProposalResponse.Status.SUCCESS) {
-//                log.info("Successful installed proposal response Txid: " + pres.getTransactionID() + " from peer " + pres.getPeer().getName());
-//                successful.add(pres);
-//            } else {
-//                failed.add(pres);
-//            }
-//        }
-//
-//        log.info("Received " + res.size() + " install proposal responses. Successful: " + successful.size() + " . Failed: " + failed.size());
-//
-////        if (failed.size() > 0) {
-////            ProposalResponse first = failed.iterator().next();
-////            fail("Not enough endorsers for install :" + successful.size() + ".  " + first.getMessage());
-////        }
-//        
-//      
-//    }
 
     private ChaincodeResult query(Channel channel, String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws ProposalException, InvalidArgumentException, NoSuchAlgorithmException {
     	
@@ -210,11 +250,18 @@ public class Dispatcher {
         ChaincodeID CCId = ChaincodeID.newBuilder().setName(chaincodeId).build();
         qpr.setChaincodeID(CCId);
         
+        // check if there are signers for contract (if there aren't, this is a first interaction)
+        Collection<Peer> signerNodes = signers.get(chaincodeId);
+        if (signerNodes == null || signerNodes.isEmpty()) {
+        	// there are not. let us default to the bootstrap nodes on the channel
+        	signerNodes = channel.getPeers();
+        }
+        
         // CC function to be called
         qpr.setFcn(chaincodeFn);
         qpr.setArgs(chaincodeArgs);
         qpr.setProposalWaitTime(cfg.getLong("hlf.proposal.timeout"));
-        Collection<ProposalResponse> responses = channel.queryByChaincode(qpr, channel.getPeers());
+        Collection<ProposalResponse> responses = channel.queryByChaincode(qpr, signerNodes);
 
         log.info("Sending query request, function '" + chaincodeFn + "' with arguments ['" + String.join("', '", chaincodeArgs) + "'], through chaincode '" + chaincodeId + "'...");
         
@@ -222,7 +269,7 @@ public class Dispatcher {
         String responseString = null;
         List<ByteString> signatureStrings = new ArrayList<ByteString>(responses.size());
         for (ProposalResponse rsp : responses) {
-        	// if valid (OBS: ISVERIFIED IS BROKEN ON PURPOSE, IT WILL ALWAYS RETURN TRUE. VALIDATION WILL OCCUR DIRECTLY HERE)
+        	// if valid
         	if (rsp.isVerified() && rsp.getStatus() == ProposalResponse.Status.SUCCESS) {
         		responseString = rsp.getProposalResponse().getResponse().getPayload().toStringUtf8();
         		signatureStrings.add(rsp.getProposalResponse().getEndorsement().getSignature());
@@ -255,14 +302,20 @@ public class Dispatcher {
         
         // build cc id providing the chaincode name. Version is omitted here.
         ChaincodeID CCId = ChaincodeID.newBuilder().setName(chaincodeId).build();
+        
+        // check if there are signers for contract (if there aren't, this is a first interaction)
+        Collection<Peer> signerNodes = signers.get(chaincodeId);
+        if (signerNodes == null || signerNodes.isEmpty()) {
+        	// there are not. let us default to the bootstrap nodes on the channel
+        	signerNodes = channel.getPeers();
+        }
 
         // CC function to be called
         tpr.setChaincodeID(CCId);
         tpr.setFcn(chaincodeFn);
         tpr.setArgs(chaincodeArgs);
         tpr.setProposalWaitTime(cfg.getLong("hlf.proposal.timeout"));
-        
-        Collection<ProposalResponse> responses = channel.sendTransactionProposal(tpr, channel.getPeers());
+        Collection<ProposalResponse> responses = channel.sendTransactionProposal(tpr, signerNodes);
         
         log.info("Sending transaction proposal, function '" + chaincodeFn + "' with arguments ['" + String.join("', '", chaincodeArgs) + "'], through chaincode '" + chaincodeId + "'...");
        
@@ -281,8 +334,15 @@ public class Dispatcher {
         log.info("Collecting endorsements and sending transaction...");
 
 
+        // check if there are orderers for contract (if there aren't, this is a first interaction)
+        Collection<Orderer> ordererNodes = orderers.get(chaincodeId);
+        if (ordererNodes == null || ordererNodes.isEmpty()) {
+        	// there are not. let us default to the bootstrap nodes on the channel
+        	ordererNodes = channel.getOrderers();
+        }
+        
         // send transaction with endorsements
-        TransactionEvent te = channel.sendTransaction(responses).get(
+        TransactionEvent te = channel.sendTransaction(responses, ordererNodes).get(
 			cfg.getLong("hlf.transaction.timeout"), 
 			TimeUnit.MILLISECONDS
 		);
@@ -292,42 +352,6 @@ public class Dispatcher {
         return new ChaincodeResult(ChaincodeResult.CHAINCODE_SUCCESS, te.getTimestamp(), signatureStrings);
     }
     
-    private Channel initChannel(String channelName, NodeConnection[] nodesOnChannel) throws InvalidArgumentException, TransactionException {
-        
-    	Channel channel = client.newChannel(channelName);
-    	
-    	for (int i = 0; i < nodesOnChannel.length; i++) {
-    		File tlsCrt = Paths.get(nodesOnChannel[i].tlsCrtPath).toFile();
-            
-            if (!tlsCrt.exists())
-            	throw new RuntimeException("Missing TLS cert files");
-            
-            Properties secPeerProperties = new Properties();
-            secPeerProperties.setProperty("hostnameOverride", nodesOnChannel[i].name);
-            secPeerProperties.setProperty("sslProvider", cfg.getString("hlf.communication.sslProvider"));
-            secPeerProperties.setProperty("negotiationType", cfg.getString("hlf.communication.negotiationMode"));
-            secPeerProperties.setProperty("pemFile", tlsCrt.getAbsolutePath());
-            
-            if (nodesOnChannel[i].type == NodeConnection.PEER_TYPE) {
-            	// peer name and endpoint in network
-	            Peer peer = client.newPeer(nodesOnChannel[i].name, "grpcs://" + nodesOnChannel[i].host + ":"  + nodesOnChannel[i].port, secPeerProperties);
-	            channel.addPeer(peer);
-	            if (i == 0) {
-	            // eventhub on peer endpoints
-	            EventHub eventHub = client.newEventHub("eventhub0" + i, "grpcs://" + nodesOnChannel[i].host + ":" + nodesOnChannel[i].eventHubPort, secPeerProperties);
-	            channel.addEventHub(eventHub);
-	            }
-            } else if (nodesOnChannel[i].type == NodeConnection.ORDERER_TYPE) {
-            	// orderer name and endpoint in network
-                Orderer orderer = client.newOrderer(nodesOnChannel[i].name, "grpcs://" + nodesOnChannel[i].host + ":"  + nodesOnChannel[i].port, secPeerProperties);
-                channel.addOrderer(orderer);
-            }
-    	}
-    	
-    	// init channel, finally
-        channel.initialize();
-        return channel;
-    }
 
     /**
      * Create new HLF client

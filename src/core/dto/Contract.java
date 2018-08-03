@@ -79,8 +79,8 @@ public class Contract {
 	}
 	
 	@SuppressWarnings("unchecked")
-	public List<String> getContractListAttr(String key) {
-		return (List<String>) attributes.get(key);
+	public List<?> getContractListAttr(String key) {
+		return (List<?>) attributes.get(key);
 	}
 	
 	public String getRawRepresentation() {

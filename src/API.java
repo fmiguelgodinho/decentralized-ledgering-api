@@ -54,7 +54,7 @@ public class API {
 	public static final String CONFIG_FILEPATH = "conf/config.properties";
 	
 	// TODO: nodes can be specified on contract
-	public static NodeConnection[] HLF_INTEGRATION_CHANNEL_NODES;
+	public static NodeConnection[] HLF_INTEGRATION_BOOTSTRAP_NODES;
 	
 	private static Configuration cfg;
 	private static ContractInterpreter ci;
@@ -87,11 +87,11 @@ public class API {
 		// set up bootstrap nodes
 		
 		String[] bootstrapNodes = cfg.getStringArray("hlf.bootstrapNodes");
-		HLF_INTEGRATION_CHANNEL_NODES = new NodeConnection[bootstrapNodes.length];
+		HLF_INTEGRATION_BOOTSTRAP_NODES = new NodeConnection[bootstrapNodes.length];
 		for (int i = 0; i < bootstrapNodes.length; i++) {
 			String cfgNode = bootstrapNodes[i];
 			int nodeType = cfg.getInt("bootstrapNode." + cfgNode + ".type");
-			HLF_INTEGRATION_CHANNEL_NODES[i] = new NodeConnection(
+			HLF_INTEGRATION_BOOTSTRAP_NODES[i] = new NodeConnection(
 				nodeType,
 				cfg.getString("bootstrapNode." + cfgNode + ".name"),
 				cfg.getString("bootstrapNode." + cfgNode + ".host"),
@@ -109,7 +109,7 @@ public class API {
         // initialize dispatcher
         Dispatcher dpt = new Dispatcher(
         	cfg,
-    		HLF_INTEGRATION_CHANNEL_NODES
+    		HLF_INTEGRATION_BOOTSTRAP_NODES
     	);     
 
         // initialize mongo client

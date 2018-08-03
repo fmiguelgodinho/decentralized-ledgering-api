@@ -10,10 +10,14 @@ import java.security.cert.X509Certificate;
 import java.text.Format;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 
@@ -21,6 +25,7 @@ import org.apache.commons.configuration2.Configuration;
 import org.apache.commons.lang3.ArrayUtils;
 import org.hyperledger.fabric.sdk.exception.InvalidArgumentException;
 import org.hyperledger.fabric.sdk.exception.ProposalException;
+import org.hyperledger.fabric.sdk.exception.TransactionException;
 
 import com.mongodb.BasicDBObject;
 import com.mongodb.DB;
@@ -33,6 +38,7 @@ import core.dto.ChaincodeResult;
 import core.dto.Contract;
 import core.exception.InvalidContractPropertyException;
 import core.exception.NonConformantContractException;
+import util.NodeConnection;
 
 public class ContractInterpreter {
 		
@@ -43,10 +49,26 @@ public class ContractInterpreter {
 	private DBCollection contractCollection;
 	private Dispatcher dpt;
 	
+	// aux vars
+	private String trustedCaPath;
+	// this is stored in memory. everytime the hub is restarted it will reverify a given contract as this will be empty
+	// the intention of this structure is to maintain knowledge about which contracts have already been parsed by the hub
+	// in terms of validity and properties that should hold
+	private Set<String> verifiedContracts; 
+	
 	public ContractInterpreter(Configuration cfg, MongoClient dbClient, Dispatcher dpt) {
+		// start db contract collection
 		DB db = dbClient.getDB(cfg.getString("mongo.database"));
 		contractCollection = db.getCollection(cfg.getString("mongo.contractCollection"));
+		
+		// keep a ref to dispatcher
 		this.dpt = dpt;
+		
+		// init verified contracts hashset
+		verifiedContracts = new HashSet<>();
+
+		// save trusted CA path for later use
+		trustedCaPath = cfg.getString("hlf.trustedCasPath");
 	}
 	
 	/*** LOAD AND SAVE CONTRACT METHODS ***/
@@ -246,8 +268,15 @@ public class ContractInterpreter {
 	 */
 	public ChaincodeResult verifyAndExecuteContract(int op, String channelName, String cid, Contract cc, String function, X509Certificate clientCrt, String[] args) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException, InvalidContractPropertyException {
 		
+		
+		String verificationKey = channelName + "." + cid;
+		
 		// check if contract conforms to standard
-		if (cc.conformsToStandard()) {
+		if (!verifiedContracts.contains(verificationKey)) {
+			
+			// check if it conforms to the known format
+			if (!cc.conformsToStandard())
+				throw new InvalidContractPropertyException("Contract format is unrecognized");
 			
 			Contract extProps = cc.getExtendedContractProperties();
 			
@@ -255,11 +284,17 @@ public class ContractInterpreter {
 			// check contract validity
 			try {
 				String expireSpec = extProps.getContractStringAttr("expires-on").replace("T", " ");
+				String validFromSpec = extProps.getContractStringAttr("valid-from").replace("T", " ");
 				Format formatter = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
 				Date expiresOn = (Date) formatter.parseObject(expireSpec);
+				Date validFrom = (Date) formatter.parseObject(validFromSpec);
 				
 				if (new Date().compareTo(expiresOn) >= 0) {
 					throw new InvalidContractPropertyException("Contract has expired");
+				}
+				
+				if (new Date().compareTo(validFrom) < 0) {
+					throw new InvalidContractPropertyException("Contract validity is yet to start");
 				}
 			} catch (ParseException e) {
 				e.printStackTrace();
@@ -278,11 +313,58 @@ public class ContractInterpreter {
 				throw new InvalidContractPropertyException("Unknown signature type on contract (known are 'multisig' and 'threshsig')");
 			}
 			
-			// TODO check if function exists and has the correct args supplied to it
+		
+			List<Map<String, ?>> signingNodes = (List<Map<String, ?>>) extProps.getContractListAttr("signing-nodes");
+			List<Map<String, ?>> consensusNodes = (List<Map<String, ?>>) extProps.getContractListAttr("consensus-nodes");
+			List<NodeConnection> nodesForContract = new ArrayList<NodeConnection>(signingNodes.size() + consensusNodes.size());
 			
-			return executeContract(op, channelName, cid, function, clientCrt, args);
+			// get contract signing nodes
+			for (Map<String, ?> nodeConnectionSpec : signingNodes) {
+				
+				String nodeName = (String) nodeConnectionSpec.get("name");
+				String nodeDomain = nodeName.substring(nodeName.indexOf(".")+1);
+				nodesForContract.add(new NodeConnection(
+					NodeConnection.PEER_TYPE,
+					(String) nodeConnectionSpec.get("name"),
+					(String) nodeConnectionSpec.get("host"),
+					(int) nodeConnectionSpec.get("port"),
+					(int) nodeConnectionSpec.get("event-hub-port"),
+					trustedCaPath + "/tlsca." + nodeDomain + "-cert.pem"
+				));
+			}
+			
+			// get contract consensus nodes
+			for (Map<String, ?> nodeConnectionSpec : consensusNodes) {
+				
+				String nodeName = (String) nodeConnectionSpec.get("name");
+				String nodeDomain = nodeName.substring(nodeName.indexOf(".")+1);
+				nodesForContract.add(new NodeConnection(
+					NodeConnection.ORDERER_TYPE,
+					(String) nodeConnectionSpec.get("name"),
+					(String) nodeConnectionSpec.get("host"),
+					(int) nodeConnectionSpec.get("port"),
+					-1,
+					trustedCaPath + "/tlsca." + nodeDomain + "-cert.pem"
+				));
+			}
+			
+			// update channel with signing and orderer nodes (i.e. stop using bootstrap nodes for signing)
+			try {
+				dpt.updateChannelForContract(
+						channelName, 
+						cid, 
+						nodesForContract.toArray(new NodeConnection[nodesForContract.size()])
+				);
+			} catch (TransactionException e) {
+				e.printStackTrace();
+			}
+			
+			verifiedContracts.add(verificationKey); // set contract as validated
+			
 		}
-		return null;
+
+		// execute fn
+		return executeContract(op, channelName, cid, function, clientCrt, args);
 	}
 	
 	/**
