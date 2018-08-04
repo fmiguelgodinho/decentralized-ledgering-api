@@ -48,7 +48,6 @@ public class Dispatcher {
     private static final Logger log = Logger.getLogger(Dispatcher.class);
     
     private HFClient client;
-    private ConcurrentMap<String, Channel> channels;
     private ConcurrentMap<String, Collection<Peer>> signers; // per contract
     private ConcurrentMap<String, Collection<Orderer>> orderers; // per contract
     private Configuration cfg;
@@ -73,9 +72,6 @@ public class Dispatcher {
         client.setUserContext(appUser);
         // set threshsig group key for when needed
         client.getCryptoSuite().setThreshSigGroupKey(cfg.getString("crypto.threshsig.groupKey").getBytes());
-
-        // init channel map
-        channels = new ConcurrentHashMap<String,Channel>();
         
         // init contract nodes maps
         signers = new ConcurrentHashMap<String, Collection<Peer>>();
@@ -122,24 +118,24 @@ public class Dispatcher {
     
     public Channel changeChannel(String channelName) throws IllegalArgumentException {
     	
-    	if (!channels.containsKey(channelName)) {
+    	Channel c = client.getChannel(channelName);
+    	if (c == null) {
     		throw new IllegalArgumentException("No such channel exists: " + channelName);
     	}
     	
     	// ret current channel
-    	return channels.get(channelName);
+    	return c;
     	
     }
     
     public void updateChannelForContract(String channelName, String contractId, NodeConnection[] newNodesOnChannel) throws InvalidArgumentException, TransactionException {
     	
     	// get channel to update and its nodes
-    	Channel oldChannel = channels.get(channelName);
+    	Channel oldChannel = client.getChannel(channelName);
     	Collection<Peer> existingPeers = oldChannel.getPeers();
     	Collection<Orderer> existingOrderers = oldChannel.getOrderers();
     	// remove it
-    	channels.remove(channelName);
-    	oldChannel.shutdown(true);
+    	client.removeChannel(oldChannel); // don't ask, it works and preserves old nodes
     	
     	// clear any old refs to signers and orderers we might have
     	signers.remove(contractId);
@@ -148,21 +144,8 @@ public class Dispatcher {
 		// create channel and add nodes nodes
     	Channel channel = client.newChannel(channelName);
     	
-    	// add existing nodes to new channel (these will be the bootstrap nodes typically
-    	List<String> oldNodeNames = new ArrayList<String>(existingOrderers.size() + existingPeers.size());
-    	for (Peer oldPeer : existingPeers) {
-    		channel.addPeer(oldPeer);
-    	}
-    	for (Orderer oldOrderer : existingOrderers) {
-    		channel.addOrderer(oldOrderer);
-    	}
-    	
     	// add new nodes
     	for (int i = 0; i < newNodesOnChannel.length; i++) {
-    		
-    		// if the peer already exists, ignore its addition
-    		if (oldNodeNames.contains(newNodesOnChannel[i].name))
-    			continue;
     		
     		File tlsCrt = Paths.get(newNodesOnChannel[i].tlsCrtPath).toFile();
             
@@ -189,17 +172,9 @@ public class Dispatcher {
     	
     	// init channel, finally
         channel.initialize();
-        channels.put(channelName, channel);
     }
     
     private void createChannel(String newChannelName, NodeConnection[] nodesOnChannel) throws InvalidArgumentException, TransactionException {
-    	
-    	Channel existingChannelCfg = channels.get(newChannelName);
-    	
-    	// if channel does exist, remove it in order to initialize new channel on the client side
-    	if (existingChannelCfg != null) {
-    		channels.remove(newChannelName);
-    	}
         	
 		// create channel and add nodes nodes
     	Channel channel = client.newChannel(newChannelName);
@@ -234,7 +209,6 @@ public class Dispatcher {
     	
     	// init channel, finally
         channel.initialize();
-        channels.put(newChannelName, channel);
     }
 
     private ChaincodeResult query(Channel channel, String chaincodeId, String chaincodeFn, String[] chaincodeArgs) throws ProposalException, InvalidArgumentException, NoSuchAlgorithmException {
