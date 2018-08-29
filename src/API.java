@@ -37,6 +37,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.mbed.coap.server.CoapServer;
 import com.mongodb.MongoClient;
 import com.mongodb.MongoClientURI;
 
@@ -67,10 +68,21 @@ public class API {
 		// start internal modules of the API
 		startInternalModules();
 		
-		// start the REST service itself
+		// start the REST service
 		startRESTServer();
+		
+		// start the CoAP service
+		startCoAPServer();
 	}
 	
+	private static void startCoAPServer() throws IllegalStateException, IOException {
+		CoapServer server = CoapServer.builder().transport(
+	        	cfg.getInt("api.coap.port")
+	    ).build();
+		
+		server.start();
+	}
+
 	private static void setUpConfigurations() throws FileNotFoundException, IOException, ConfigurationException {
 		
 		// load config file
@@ -127,7 +139,7 @@ public class API {
 	private static void startRESTServer() {
 		// set port, https and threadpool config
         port(
-        	cfg.getInt("api.port")
+        	cfg.getInt("api.rest.port")
     	);
         threadPool(
     		cfg.getInt("api.threadPool.max"), 

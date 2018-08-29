@@ -59,6 +59,10 @@
 						<enabled>true</enabled>
 					</snapshots>
 				</repository>
+				<repository>
+				    <id>jitpack.io</id>
+				    <url>https://jitpack.io</url>
+				</repository>
 			</repositories>
 		</profile>
 	</profiles>
@@ -115,5 +119,11 @@
 			<artifactId>commons-beanutils</artifactId>
 			<version>1.9.3</version>
 		</dependency>
+		<dependency>
+		    <groupId>com.mbed.java-coap</groupId>
+		    <artifactId>coap-core</artifactId>
+		    <version>5.0.0</version>
+		</dependency>
+				
 	</dependencies>
 </project>
