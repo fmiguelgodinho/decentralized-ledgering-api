@@ -37,6 +37,7 @@ import core.ContractInterpreter;
 import core.Dispatcher;
 import core.dto.ChaincodeResult;
 import core.dto.Contract;
+import endpoint.EntityType;
 import spark.Request;
 import spark.Response;
 
@@ -112,7 +113,12 @@ public class RESTServer {
 
 		try {
 			// delegate get contract to interpreter
-			Contract contract = ci.getContract(channel, cid, extractClientCrt(req));
+			Contract contract = ci.getContract(
+					EntityType.ENTITY_TYPE_USER,
+					channel, 
+					cid,
+					extractClientCrt(req)
+			);
 
 			// produce an hash of the contract
 			MessageDigest md = MessageDigest.getInstance("SHA-256");
@@ -207,7 +213,13 @@ public class RESTServer {
     	try {
     		
     		// get client crt first
-    		boolean result = ci.signContract(channel, cid, extractClientCrt(req), clientSig);
+    		boolean result = ci.signContract(
+					EntityType.ENTITY_TYPE_USER,
+					channel, 
+					cid, 
+					extractClientCrt(req), 
+					clientSig
+			);
     		
     		rsp.status(200);
     		if (shouldReturnHtml(req)) {
@@ -357,7 +369,15 @@ public class RESTServer {
 	
 			
 			// execute the function
-			ChaincodeResult result = ci.verifyAndExecuteContract(type, channel, cid, oid, extractClientCrt(req), args);
+			ChaincodeResult result = ci.verifyAndExecuteContract(
+					EntityType.ENTITY_TYPE_USER,
+					type, 
+					channel, 
+					cid, 
+					oid, 
+					extractClientCrt(req), 
+					args
+			);
 			// check for chain code failure
 			if (result == null || result.getStatus() == ChaincodeResult.CHAINCODE_FAILURE) {
 

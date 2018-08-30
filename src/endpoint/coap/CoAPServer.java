@@ -6,7 +6,6 @@ import org.apache.commons.configuration2.Configuration;
 
 import com.mbed.coap.server.CoapHandler;
 import com.mbed.coap.server.CoapServer;
-import com.mbed.coap.utils.ReadOnlyCoapResource;
 
 import core.ContractInterpreter;
 
@@ -26,7 +25,7 @@ public class CoAPServer {
 	    ).build();
 
 		// setup handler for contract query/invoke
-		CoapHandler handler = new ContractCoapResource();
+		CoapHandler handler = new SmartContractCoAPResource(ci);
 		server.addRequestHandler("/contract", handler);
 		server.start();
 	}

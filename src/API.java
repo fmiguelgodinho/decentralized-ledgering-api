@@ -8,9 +8,6 @@ import org.apache.commons.configuration2.builder.fluent.Configurations;
 import org.apache.commons.configuration2.ex.ConfigurationException;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
-import com.mbed.coap.server.CoapHandler;
-import com.mbed.coap.server.CoapServer;
-import com.mbed.coap.utils.ReadOnlyCoapResource;
 import com.mongodb.MongoClient;
 import com.mongodb.MongoClientURI;
 

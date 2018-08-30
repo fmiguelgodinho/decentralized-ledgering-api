@@ -38,11 +38,11 @@ import core.dto.ChaincodeResult;
 import core.dto.Contract;
 import core.exception.InvalidContractPropertyException;
 import core.exception.NonConformantContractException;
+import endpoint.EntityType;
 import util.NodeConnection;
 
 public class ContractInterpreter {
 		
-	
 	public static final List<String> CONTRACT_SIGNATURE_TYPES = Arrays.asList(new String[] {"multisig", "threshsig"});
 	
 	// TODO: update contracts in db if updated in bc?
@@ -73,7 +73,7 @@ public class ContractInterpreter {
 	
 	/*** LOAD AND SAVE CONTRACT METHODS ***/
 	
-	public Contract getContract(String channel, String cid, X509Certificate clientCrt) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException, NonConformantContractException, InvalidContractPropertyException {
+	public Contract getContract(EntityType entityType, String channel, String cid, X509Certificate clientCrt) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException, NonConformantContractException, InvalidContractPropertyException {
 		
 		// try to first load it from db - quicker
 		Contract contract = loadContractFromDb(channel, cid);
@@ -81,14 +81,14 @@ public class ContractInterpreter {
 			return contract;
 		
 		// it wasn't in db! try to retrieve it from blockchain - slower
-		contract = loadContractFromBlockchain(channel, cid, clientCrt);
+		contract = loadContractFromBlockchain(entityType, channel, cid, clientCrt);
 		
 		if (!contract.conformsToStandard()) {
 			throw new NonConformantContractException("Contract does not conform to standard!");
 		}
 		
 		// fetch sig from the blockchain as well
-		setContractSignature(channel, cid,  contract, clientCrt);
+		setContractSignature(entityType, channel, cid,  contract, clientCrt);
 		
 		// save contract to db for future times
 		if (contract != null)
@@ -124,10 +124,11 @@ public class ContractInterpreter {
 		return contractObj;
 	}
 	
-	private Contract loadContractFromBlockchain(String channel, String cid, X509Certificate clientCrt) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
+	private Contract loadContractFromBlockchain(EntityType entityType, String channel, String cid, X509Certificate clientCrt) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
 		
     	// query the chaincode
     	ChaincodeResult cr = executeContract(
+    		entityType,
 			Dispatcher.CHAINCODE_QUERY_OPERATION, 
 			channel,
 			cid, 
@@ -164,10 +165,11 @@ public class ContractInterpreter {
 		);
 	}
 	
-	private void setContractSignature(String channel, String cid, Contract cc, X509Certificate clientCrt) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException, InvalidContractPropertyException {
+	private void setContractSignature(EntityType entityType, String channel, String cid, Contract cc, X509Certificate clientCrt) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException, InvalidContractPropertyException {
 
 		// fetch client signature from contract
     	ChaincodeResult cr = verifyAndExecuteContract(
+			entityType,
 			Dispatcher.CHAINCODE_QUERY_OPERATION, 
 			channel,
 			cid,
@@ -190,10 +192,10 @@ public class ContractInterpreter {
 	/**
 	 * Method for a client to sign a contract and start using it.
 	 */
-	public boolean signContract(String channel, String cid, X509Certificate clientCrt, String signature) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException, NonConformantContractException, InvalidContractPropertyException {
+	public boolean signContract(EntityType entityType, String channel, String cid, X509Certificate clientCrt, String signature) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException, NonConformantContractException, InvalidContractPropertyException {
 		
 		// get again the contract the client "supposedly" signed
-    	Contract contract = getContract(channel, cid, clientCrt);
+    	Contract contract = getContract(entityType, channel, cid, clientCrt);
     	
     	// verify sig
     	boolean isCorrectlySigned = false;
@@ -206,6 +208,7 @@ public class ContractInterpreter {
     			
     			// call sign fn
     			ChaincodeResult cr = verifyAndExecuteContract(
+    				entityType,
 					Dispatcher.CHAINCODE_INVOKE_OPERATION, 
         			channel, 
         			cid,
@@ -256,17 +259,17 @@ public class ContractInterpreter {
 	 * Main method to execute a contract function. It verifies the contract specification beforehand
 	 * To be called when contract object is not available
 	 */
-	public ChaincodeResult verifyAndExecuteContract(int op, String channelName, String cid, String function, X509Certificate clientCrt, String[] args) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException, NonConformantContractException, InvalidContractPropertyException {
+	public ChaincodeResult verifyAndExecuteContract(EntityType entityType, int op, String channelName, String cid, String function, X509Certificate clientCrt, String[] args) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException, NonConformantContractException, InvalidContractPropertyException {
 		// get the contract and then verify and execute the function
-		Contract cc = getContract(channelName, cid, clientCrt);
-		return verifyAndExecuteContract(op, channelName, cid, cc, function, clientCrt, args);
+		Contract cc = getContract(entityType, channelName, cid, clientCrt);
+		return verifyAndExecuteContract(entityType, op, channelName, cid, cc, function, clientCrt, args);
 	}
 	
 	/**
 	 * Main method to execute a contract function. It verifies the contract specification beforehand
 	 * To be called when contract object is available
 	 */
-	public ChaincodeResult verifyAndExecuteContract(int op, String channelName, String cid, Contract cc, String function, X509Certificate clientCrt, String[] args) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException, InvalidContractPropertyException {
+	public ChaincodeResult verifyAndExecuteContract(EntityType entityType, int op, String channelName, String cid, Contract cc, String function, X509Certificate clientCrt, String[] args) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException, InvalidContractPropertyException {
 		
 		
 		String verificationKey = channelName + "." + cid;
@@ -364,20 +367,25 @@ public class ContractInterpreter {
 		}
 
 		// execute fn
-		return executeContract(op, channelName, cid, function, clientCrt, args);
+		return executeContract(entityType, op, channelName, cid, function, clientCrt, args);
 	}
 	
 	/**
 	 * Final contract execution method. After contract spec has been verified
 	 */
-	private ChaincodeResult executeContract(int op, String channelName, String cid, String function, X509Certificate clientCrt, String[] args) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
+	private ChaincodeResult executeContract(EntityType entityType, int op, String channelName, String cid, String function, X509Certificate clientCrt, String[] args) throws ProposalException, InvalidArgumentException, ExecutionException, TimeoutException {
 		
 		try {
 
-			byte[] pubKey = Base64.getEncoder().encode(clientCrt.getPublicKey().getEncoded());
-
-			// put signature on first argument!
-			args = ArrayUtils.insert(0, args, new String(pubKey));
+			if (entityType == EntityType.ENTITY_TYPE_USER) {
+				byte[] pubKey = Base64.getEncoder().encode(clientCrt.getPublicKey().getEncoded());
+	
+				// put signature on first argument!
+				args = ArrayUtils.insert(0, args, new String(pubKey));
+			} else {
+				// add an empty value where the public key should be
+				args = ArrayUtils.insert(0, args, "");
+			}
 			
 			return dpt.callChaincodeFunction(
 					op, 
