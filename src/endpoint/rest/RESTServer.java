@@ -1,4 +1,4 @@
-package core.rest;
+package endpoint.rest;
 
 import static j2html.TagCreator.body;
 import static j2html.TagCreator.br;
@@ -40,15 +40,15 @@ import core.dto.Contract;
 import spark.Request;
 import spark.Response;
 
-public class RestServer {
+public class RESTServer {
 	
 	
 	private static Configuration cfg;
 	private static ContractInterpreter ci;
 	
-	public RestServer(Configuration cfg, ContractInterpreter ci) {
-		this.cfg = cfg;
-		this.ci = ci;
+	public RESTServer(Configuration cfg, ContractInterpreter ci) {
+		RESTServer.cfg = cfg;
+		RESTServer.ci = ci;
 	}
 	
 	public void start() {

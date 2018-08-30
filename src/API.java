@@ -1,53 +1,23 @@
-import static j2html.TagCreator.body;
-import static j2html.TagCreator.br;
-import static j2html.TagCreator.button;
-import static j2html.TagCreator.div;
-import static j2html.TagCreator.each;
-import static j2html.TagCreator.form;
-import static j2html.TagCreator.h3;
-import static j2html.TagCreator.input;
-import static j2html.TagCreator.p;
-import static j2html.TagCreator.pre;
-import static j2html.TagCreator.span;
-import static j2html.TagCreator.textarea;
-import static spark.Spark.get;
-import static spark.Spark.path;
-import static spark.Spark.port;
-import static spark.Spark.post;
-import static spark.Spark.secure;
-import static spark.Spark.threadPool;
-
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.security.MessageDigest;
 import java.security.Security;
-import java.security.cert.X509Certificate;
-import java.text.DateFormat;
-import java.text.SimpleDateFormat;
-import java.util.Base64;
-import java.util.List;
 
 import org.apache.commons.configuration2.Configuration;
 import org.apache.commons.configuration2.builder.fluent.Configurations;
 import org.apache.commons.configuration2.ex.ConfigurationException;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.mbed.coap.server.CoapHandler;
 import com.mbed.coap.server.CoapServer;
+import com.mbed.coap.utils.ReadOnlyCoapResource;
 import com.mongodb.MongoClient;
 import com.mongodb.MongoClientURI;
 
 import core.ContractInterpreter;
 import core.Dispatcher;
-import core.dto.ChaincodeResult;
-import core.dto.Contract;
-import core.rest.RestServer;
-import spark.Request;
-import spark.Response;
+import endpoint.coap.CoAPServer;
+import endpoint.rest.RESTServer;
 import util.NodeConnection;
 
 public class API {
@@ -70,24 +40,10 @@ public class API {
 		startInternalModules();
 		
 		// start the REST service
-		startRESTServer();
+		new RESTServer(cfg, ci).start();
 		
 		// start the CoAP service
-		startCoAPServer();
-	}
-	
-	private static void startRESTServer() {
-		// setup the rest server
-		RestServer srv = new RestServer(cfg, ci);
-		srv.start();
-	}
-
-	private static void startCoAPServer() throws IllegalStateException, IOException {
-		CoapServer server = CoapServer.builder().transport(
-	        	cfg.getInt("api.coap.port")
-	    ).build();
-		
-		server.start();
+		new CoAPServer(cfg, ci).start();
 	}
 
 	private static void setUpConfigurations() throws FileNotFoundException, IOException, ConfigurationException {
