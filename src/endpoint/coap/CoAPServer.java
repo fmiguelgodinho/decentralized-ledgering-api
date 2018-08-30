@@ -1,6 +1,7 @@
 package endpoint.coap;
 
 import java.io.IOException;
+import java.lang.IllegalStateException;
 
 import org.apache.commons.configuration2.Configuration;
 

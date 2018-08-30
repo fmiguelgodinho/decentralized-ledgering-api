@@ -1,6 +1,7 @@
 package endpoint.coap;
 
 import java.io.IOException;
+import java.lang.IllegalArgumentException;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.List;
@@ -176,7 +177,7 @@ public class SmartContractCoAPResource extends CoapResource {
 			this.channel = null;
 			this.cid = null;
 			this.oid = null;
-			this.args = null;
+			this.args = new String[] {};
 		}
 	}
 	private RequestParameters parseParametersFromBody(String body) {
