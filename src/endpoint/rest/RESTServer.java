@@ -58,9 +58,9 @@ public class RESTServer {
         	cfg.getInt("api.rest.port")
     	);
         threadPool(
-    		cfg.getInt("api.threadPool.max"), 
-    		cfg.getInt("api.threadPool.min"), 
-    		cfg.getInt("api.threadPool.timeout")
+    		cfg.getInt("api.rest.threadPool.max"), 
+    		cfg.getInt("api.rest.threadPool.min"), 
+    		cfg.getInt("api.rest.threadPool.timeout")
         );
         secure(
     		cfg.getString("api.ssl.keystorePath"), 

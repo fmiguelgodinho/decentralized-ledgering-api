@@ -26,7 +26,7 @@ public class CoAPServer {
 	    ).build();
 
 		// setup handler for contract query/invoke
-		CoapHandler handler = new SmartContractCoAPResource(ci);
+		CoapHandler handler = new SmartContractCoAPResource(ci, cfg.getInt("api.coap.threadPool"));
 		server.addRequestHandler("/contract", handler);
 		server.start();
 	}
